@@ -1,0 +1,220 @@
+[
+ {
+  "name": "the ffmpeg card has no Install (download) button any more",
+  "ok": true,
+  "info": {
+   "installBtn": 0,
+   "progRow": 0,
+   "pickBtn": 1,
+   "shots": 0,
+   "shotWord": false,
+   "snapshotApi": "function"
+  }
+ },
+ {
+  "name": "no screenshot button survives in the UI",
+  "ok": true,
+  "info": {
+   "installBtn": 0,
+   "progRow": 0,
+   "pickBtn": 1,
+   "shots": 0,
+   "shotWord": false,
+   "snapshotApi": "function"
+  }
+ },
+ {
+  "name": "the install_ffmpeg / save_snapshot / capture_page bridge entries are gone",
+  "ok": true,
+  "info": {
+   "host": [],
+   "web": [
+    "undefined",
+    "undefined"
+   ],
+   "call": "null",
+   "pickInApi": true,
+   "mainFn": "undefined"
+  }
+ },
+ {
+  "name": "choosing ffmpeg.exe by hand registers the engine",
+  "ok": true,
+  "info": {
+   "ok": true,
+   "dir": "/usr/bin",
+   "version": "7.1.5-0+deb13u1",
+   "status": true,
+   "path": "/usr/bin/ffmpeg",
+   "btn": "Change custom build…"
+  }
+ },
+ {
+  "name": "a folder without ffmpeg.exe is rejected with a clear message",
+  "ok": true,
+  "info": {
+   "ok": false,
+   "error": "/home/user/uploads does not contain a working ffmpeg (expected ffmpeg.exe next to ffprobe.exe)",
+   "stillAvailable": true
+  }
+ },
+ {
+  "name": "an x265 file is planned as a re-encode, never as a remux",
+  "ok": true,
+  "info": {
+   "codec": "hevc",
+   "profile": "Main",
+   "plan": {
+    "hasVideo": true,
+    "videoCopy": false,
+    "needEncode": true,
+    "codec": "hevc",
+    "highBitDepth": false,
+    "audioCopy": true,
+    "vcodec": "hevc",
+    "acodec": "aac",
+    "hdr": false,
+    "audioIndex": 1,
+    "audioOrder": 0,
+    "audioSel": "0:1?"
+   }
+  }
+ },
+ {
+  "name": "the transcode stream of an x265 file is H.264 video",
+  "ok": true,
+  "info": {
+   "fetch": {
+    "status": 200,
+    "type": "video/mp4",
+    "bytes": 117768
+   },
+   "codecs": "h264:video,aac:audio"
+  }
+ },
+ {
+  "name": "playing an x265 file yields a picture (H.264 re-encode, videoWidth > 0)",
+  "ok": true,
+  "info": {
+   "codec": "hevc",
+   "unsafe": true,
+   "transcode": true,
+   "reencoded": true,
+   "stage": 2,
+   "videoWidth": 320,
+   "tail": [
+    {
+     "t": 1,
+     "tc": true,
+     "re": true,
+     "stage": 2,
+     "w": 320,
+     "rs": 4,
+     "err": false
+    }
+   ]
+  }
+ },
+ {
+  "name": "the mini bar is a window drag region (its buttons are not)",
+  "ok": true,
+  "info": {
+   "appRegion": "drag",
+   "dragRule": true,
+   "btnRegion": "no-drag"
+  }
+ },
+ {
+  "name": "the mini player keeps the position it was moved to",
+  "ok": true,
+  "info": {
+   "before": {
+    "x": 464,
+    "y": 393
+   },
+   "after": {
+    "x": 274,
+    "y": 483
+   }
+  }
+ },
+ {
+  "name": "subtitles still load from an online sidecar (round-5 regression)",
+  "ok": true,
+  "info": {
+   "cues": 1,
+   "active": "ext:/tmp/cleanmedia/harness-media.srt"
+  }
+ },
+ {
+  "name": "subtitle font / colour / shadow / outline / background all reach the cue",
+  "ok": true,
+  "info": {
+   "steps": [],
+   "tracks": [
+    "ext:/tmp/cleanmedia/harness-media.srt"
+   ],
+   "cues": 1,
+   "active": "ext:/tmp/cleanmedia/harness-media.srt",
+   "token": true,
+   "inline": "font-size:34px;font-family:Georgia, 'Times New Roman', serif;color:#FFE680;background:rgba(0,0,0,.55);padding:2px 10px;text-shadow:2px 2px 0 rgba(0,0,0,.95), -1px -1px 0 rgba(0,0,0,.6);-webkit-text-stroke:2.5px #000;paint-order:stroke fill;",
+   "family": "Georgia, \"Times New Roman\", serif",
+   "color": "rgb(255, 230, 128)",
+   "shadow": "rgba(0, 0, 0, 0.95) 2px 2px 0px, rgba(0, 0, 0, 0.6) -1px -1px 0px",
+   "stroke": "2.5px rgb(0, 0, 0)",
+   "bg": "rgba(0, 0, 0, 0.55)",
+   "previewSame": true,
+   "fontSel": "georgia",
+   "swatchOn": true,
+   "layerHtml": "<div class=\"sub-line\" dir=\"auto\" style=\"font-size:34px;font-family:Georgia, 'Times New Roman', serif;color:#FFE680;background:rgba(0,0,0,.55);padding:2px 10px;t"
+  }
+ },
+ {
+  "name": "the settings preview shows exactly the same style as the live cue",
+  "ok": true,
+  "info": {
+   "steps": [],
+   "tracks": [
+    "ext:/tmp/cleanmedia/harness-media.srt"
+   ],
+   "cues": 1,
+   "active": "ext:/tmp/cleanmedia/harness-media.srt",
+   "token": true,
+   "inline": "font-size:34px;font-family:Georgia, 'Times New Roman', serif;color:#FFE680;background:rgba(0,0,0,.55);padding:2px 10px;text-shadow:2px 2px 0 rgba(0,0,0,.95), -1px -1px 0 rgba(0,0,0,.6);-webkit-text-stroke:2.5px #000;paint-order:stroke fill;",
+   "family": "Georgia, \"Times New Roman\", serif",
+   "color": "rgb(255, 230, 128)",
+   "shadow": "rgba(0, 0, 0, 0.95) 2px 2px 0px, rgba(0, 0, 0, 0.6) -1px -1px 0px",
+   "stroke": "2.5px rgb(0, 0, 0)",
+   "bg": "rgba(0, 0, 0, 0.55)",
+   "previewSame": true,
+   "fontSel": "georgia",
+   "swatchOn": true,
+   "layerHtml": "<div class=\"sub-line\" dir=\"auto\" style=\"font-size:34px;font-family:Georgia, 'Times New Roman', serif;color:#FFE680;background:rgba(0,0,0,.55);padding:2px 10px;t"
+  }
+ },
+ {
+  "name": "«Reset look» puts every subtitle style setting back",
+  "ok": true,
+  "info": {
+   "inline": "font-size:34px;color:#ffffff;text-shadow:0 2px 10px rgba(0,0,0,.85), 0 0 2px rgba(0,0,0,.9);",
+   "font": "default",
+   "color": "#ffffff",
+   "shadow": "soft",
+   "sel": "default"
+  }
+ },
+ {
+  "name": "regression: an online stream still gets its subtitle tracks",
+  "ok": true,
+  "info": {
+   "ok": true,
+   "found": 3,
+   "token": true,
+   "tracks": [
+    "netfile:http://127.0.0.1:45999/stream/movie.srt",
+    "netfile:http://127.0.0.1:45999/stream/movie.fa.srt",
+    "netstream:2"
+   ]
+  }
+ }
+]

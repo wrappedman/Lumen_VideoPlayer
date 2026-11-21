@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-dark" data-mode="window">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
+               img-src 'self' data: blob:; media-src 'self' blob: data: http: https:;
+               connect-src 'self' http: https:; font-src 'self' data:; object-src 'none'; base-uri 'self'">
+<title>Lumen — Liquid Glass Player</title>
+<link rel="stylesheet" href="lumen.css">
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="desktop.css">
+</head>
+<body class="theme-dark" data-mode="window">
+
+<div class="stage" id="stage">
+  <div class="win" id="win">
+
+    <!-- ============================ VIDEO AREA ============================ -->
+    <div class="video-stack" id="stack" tabindex="0"
+         data-tip="Double-click sides = ±10s · Double-click center = fullscreen · Right-click / long-press = menu">
+      <div class="zoomer" id="zoomer">
+        <!-- 1) real media goes here -->
+        <!-- NOTE: never add disablepictureinpicture here — Chromium treats it as a
+           boolean attribute, so even ="false" switches Picture-in-Picture off -->
+        <video id="video" class="vlayer" playsinline preload="metadata"></video>
+        <!-- 2) design-placeholder scenes (demo mode / idle background) -->
+        <!-- the idle artwork: only the scene on screen is decoded (see ui.js) -->
+        <img class="vlayer on" data-scene="bright" src="assets/scene_cinema.jpg" alt="" draggable="false" decoding="async">
+        <img class="vlayer" data-scene="dark" data-src="assets/scene_dark.jpg" alt="" draggable="false" decoding="async">
+      </div>
+
+      <div class="subs-layer" id="subsLayer"></div>
+      <div class="fade-mask"></div>
+
+      <div class="loading"><i class="spinner"></i></div>
+
+      <div class="zoom-badge" id="zoomBadge">
+        <span data-icon="zoom-in" data-size="16"></span>
+        <span id="zoomVal">1.0×</span>
+        <span class="hint" id="zoomHint">drag = pan · edges = move window</span>
+      </div>
+
+      <div class="scrub-preview" id="scrubPreview">
+        <span data-icon="forward-10" data-size="22" id="scrubIcon"></span>
+        <div>
+          <div class="big" id="scrubTime">00:00</div>
+          <div class="sub" id="scrubDelta">+00:10</div>
+        </div>
+      </div>
+
+      <div class="drop-hint">
+        <div class="box">
+          <span data-icon="folder" data-size="40"></span>
+          <div>Drop media here</div>
+          <div class="sub">videos &amp; subtitles are added to the playlist</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================ CHROME ============================ -->
+    <div class="chrome" id="chrome">
+
+      <!-- ------- window buttons (top row, windowed / maximized) ------- -->
+      <div class="winbar" id="winbar">
+        <div class="tb-spacer"></div>
+        <button class="tb-btn" id="tbPin" title="Always on top"><span data-icon="pin" data-size="17"></span></button>
+        <button class="tb-btn" id="tbMin" title="Minimize"><span data-icon="minimize" data-size="17"></span></button>
+        <button class="tb-btn" id="tbMax" title="Maximize / restore"><span data-icon="maximize" data-size="17"></span></button>
+        <button class="tb-btn close" id="tbClose" title="Close"><span data-icon="close" data-size="17"></span></button>
+      </div>
+
+      <!-- ------- toolbar (second row) ------- -->
+      <div class="titlebar" id="titlebar">
+        <div class="tb-brand"><span class="mark" id="tbMark"></span><span class="name">Lumen</span></div>
+        <div class="tb-sep"></div>
+        <div class="tb-file">
+          <span class="fname" id="tbFile">No media loaded — drop a file or press Ctrl+O</span>
+          <span class="chip accent" id="tbChip" hidden></span>
+        </div>
+        <div class="tb-spacer"></div>
+      </div>
+
+      <!-- ------- fullscreen floating tools ------- -->
+      <div class="fs-tools" id="fsTools">
+        <button class="dbtn" id="fsPin" data-tip="Always on top"><span data-icon="pin" data-size="18"></span></button>
+        <button class="dbtn" id="fsToggle" data-tip="Fullscreen — F"><span data-icon="fullscreen" data-size="18"></span></button>
+      </div>
+
+      <!-- center play -->
+      <button class="center-play paused" id="centerPlay" title="Play (Space)"><span data-icon="play" data-size="34"></span></button>
+
+      <!-- seek feedback -->
+      <div class="seek-fx left" id="seekFxLeft">
+        <i class="halo"></i>
+        <div class="seek-chip"><span data-icon="backward-10" data-size="19"></span><span class="n" id="seekLeftN">10</span><span class="unit">SEC</span></div>
+      </div>
+      <div class="seek-fx right" id="seekFxRight">
+        <i class="halo"></i>
+        <div class="seek-chip"><span class="n" id="seekRightN">10</span><span class="unit">SEC</span><span data-icon="forward-10" data-size="19"></span></div>
+      </div>
+
+      <!-- volume OSD -->
+      <div class="osd" id="osd">
+        <span data-icon="volume-high" data-size="18"></span>
+        <div class="meter"><i style="width:65%"></i></div>
+        <b>65%</b>
+      </div>
+
+      <!-- ============ PLAYLIST PANEL ============ -->
+      <aside class="panel playlist" id="panelPlaylist">
+        <div class="panel-head">
+          <span style="color:var(--text-sub)" data-icon="playlist" data-size="17"></span>
+          <span class="ptitle">Playlist</span>
+          <span class="chip" id="plChip">0 items</span>
+          <button class="dbtn close-panel" title="Close (Esc)"><span data-icon="close" data-size="16"></span></button>
+        </div>
+        <div class="psearch"><span data-icon="search" data-size="15"></span><input id="plSearch" placeholder="Search playlist…"></div>
+        <div class="list-head">
+          <button class="dbtn" id="plShuffle" data-tip="Shuffle"><span data-icon="shuffle" data-size="17"></span></button>
+          <button class="dbtn" id="plRepeat" data-tip="Repeat — L"><span data-icon="repeat" data-size="17"></span></button>
+          <span class="val" id="plMode" style="font-size:11px;color:var(--text-dim)">off</span>
+          <span class="spacer"></span>
+          <button class="dbtn" id="plAdd" data-tip="Add files — Ctrl+O"><span data-icon="plus" data-size="17"></span></button>
+          <button class="dbtn" id="plAddFolder" data-tip="Add folder"><span data-icon="folder" data-size="17"></span></button>
+        </div>
+        <div class="panel-body" id="plBody"></div>
+        <div class="pfoot">
+          <button class="dbtn" id="plSave" data-tip="Save playlist (M3U8)"><span data-icon="folder" data-size="17"></span></button>
+          <button class="dbtn" id="plLoad" data-tip="Load playlist (M3U8)"><span data-icon="open-url" data-size="17"></span></button>
+          <span class="grow" id="plStatus">autosaved</span>
+          <button class="dbtn" id="plClear" data-tip="Clear playlist"><span data-icon="trash" data-size="17"></span></button>
+        </div>
+      </aside>
+
+      <!-- ============ SETTINGS PANEL ============ -->
+      <aside class="panel settings" id="panelSettings">
+        <div class="panel-head">
+          <span style="color:var(--text-sub)" data-icon="settings" data-size="17"></span>
+          <span class="ptitle">Settings</span>
+          <button class="dbtn" id="setResetBtn" data-tip="Reset settings"><span data-icon="reset" data-size="16"></span></button>
+          <button class="dbtn close-panel" title="Close (Esc)"><span data-icon="close" data-size="16"></span></button>
+        </div>
+        <div class="panel-body">
+
+          <!-- ---------------- playback ---------------- -->
+          <div class="sec"><h3>Playback</h3>
+            <div class="row"><span class="lbl">Speed</span>
+              <div class="seg" data-set="speed">
+                <button data-v="0.5">0.5×</button>
+                <button data-v="1" class="on">1×</button>
+                <button data-v="1.5">1.5×</button><button data-v="2">2×</button><button data-v="3">3×</button>
+              </div></div>
+            <div class="row"><span class="lbl">Hardware acceleration<div class="sub" id="hwSub">GPU decode preference for the webview + ffmpeg</div></span><div class="switch on" data-set="hw"></div></div>
+            <div class="row"><span class="lbl">Resume playback<div class="sub">Ask / continue where I left off</div></span><div class="switch on" data-set="resume"></div></div>
+            <div class="row"><span class="lbl">Play next item automatically</span><div class="switch on" data-set="autonext"></div></div>
+            <div class="row"><span class="lbl">Seek step<div class="sub">Double-tap / ← → / context menu</div></span>
+              <div class="seg" data-set="seekstep">
+                <button data-v="5">5s</button><button data-v="10" class="on">10s</button>
+                <button data-v="15">15s</button><button data-v="30">30s</button>
+              </div></div>
+            <div class="row"><span class="lbl">Volume</span><input type="range" class="lr" id="setVol" min="0" max="1" step="0.01" value="0.65"><span class="val" id="setVolVal">65%</span></div>
+          </div>
+
+          <!-- ---------------- bundled codecs ---------------- -->
+          <div class="sec"><h3>Media engine &amp; codecs</h3>
+            <div class="row"><span class="lbl">Built-in FFmpeg engine<div class="sub" id="ffStatus">Checking…</div></span>
+              <span class="chip accent" id="ffChip">bundled</span></div>
+            <div class="codec-summary">
+              <b>Included with Lumen — no codec pack or separate install is required.</b>
+              <div class="sub">Containers: MKV, MP4/MOV, WebM, AVI, MPEG-TS/M2TS, FLV, VOB, WMV/ASF, Ogg, MXF and more.</div>
+              <div class="sub">Video: H.264, HEVC/H.265 (x265, 10-bit), AV1, VP9/VP8, MPEG-1/2/4, VC-1, WMV, ProRes, Theora and many legacy codecs.</div>
+              <div class="sub">Audio: AAC, MP3, FLAC, Opus/Vorbis, AC-3/E-AC-3, DTS, TrueHD, WMA, ALAC, PCM and more.</div>
+              <div class="sub">When Chromium cannot decode a track, Lumen converts it to H.264/AAC during playback. High-resolution conversion uses CPU.</div>
+            </div>
+            <div class="row"><span class="lbl">Advanced: custom FFmpeg build<div class="sub">Optional only — the bundled engine is already active. Choose a custom build if you specifically need a different configuration.</div></span>
+              <button class="btn" id="ffPickBtn">Optional override…</button></div>
+            <div class="row"><span class="lbl">Engine check<div class="sub">Recheck the bundled engine or a custom override</div></span>
+              <button class="btn" id="ffRescanBtn">Check again</button></div>
+          </div>
+
+          <!-- ---------------- touch ---------------- -->
+          <div class="sec"><h3>Touch &amp; gestures</h3>
+            <div class="row"><span class="lbl">Enable touch gestures<div class="sub">Double-tap seek · pinch zoom · long-press menu</div></span><div class="switch on" data-set="touch"></div></div>
+            <div class="row"><span class="lbl">Swipe horizontally to seek<div class="sub">Release to jump</div></span><div class="switch on" data-set="swipe"></div></div>
+            <div class="row"><span class="lbl">Pinch to zoom</span><div class="switch on" data-set="pinch"></div></div>
+            <div class="row"><span class="lbl">Long-press (500 ms) opens the menu</span><div class="switch on" data-set="longpress"></div></div>
+            <div class="row"><span class="lbl">Double-tap width from each edge</span>
+              <div class="seg" data-set="dblw"><button data-v="0.25">25%</button><button data-v="0.31" class="on">31%</button><button data-v="0.4">40%</button></div></div>
+            <div class="row"><span class="lbl">Force touch-optimized layout<div class="sub">Bigger hit areas</div></span><div class="switch" data-set="touchui"></div></div>
+          </div>
+
+          <!-- ---------------- video / view ---------------- -->
+          <div class="sec"><h3>Picture</h3>
+            <div class="row"><span class="lbl">Aspect ratio</span>
+              <div class="seg" data-set="aspect">
+                <button data-v="auto" class="on">Auto</button><button data-v="cover">Fill</button>
+                <button data-v="16:9">16:9</button><button data-v="4:3">4:3</button><button data-v="21:9">21:9</button>
+              </div></div>
+            <div class="row"><span class="lbl">Rotate</span>
+              <div class="seg" data-set="rotate">
+                <button data-v="0" class="on">0°</button><button data-v="90">90°</button>
+                <button data-v="180">180°</button><button data-v="270">270°</button>
+              </div></div>
+            <div class="row"><span class="lbl">Zoom</span>
+              <button class="btn" id="zoomOutBtn"><span data-icon="zoom-out" data-size="15"></span></button>
+              <span class="val" id="zoomLabel" style="min-width:52px;text-align:center">100%</span>
+              <button class="btn" id="zoomInBtn"><span data-icon="zoom-in" data-size="15"></span></button>
+              <button class="btn" id="zoomResetBtn">Reset</button>
+              <button class="btn" id="zoomFitBtn">Fit</button>
+            </div>
+            <div class="row"><span class="lbl">Mouse wheel</span>
+              <div class="seg" data-set="wheel">
+                <button data-v="volume" class="on">Volume</button><button data-v="seek">Seek</button><button data-v="zoom">Zoom</button>
+              </div></div>
+            <div class="row"><span class="lbl">Smooth motion<div class="sub">Animated zoom/pan transitions</div></span><div class="switch on" data-set="smooth"></div></div>
+            <div class="row"><span class="lbl">Tone-map HDR to SDR<div class="sub">On = convert HDR sources for normal screens (ffmpeg) · Off = raw HDR passthrough</div></span><div class="switch on" data-set="hdr"></div></div>
+          </div>
+
+          <!-- ---------------- audio ---------------- -->
+          <div class="sec"><h3>Audio</h3>
+            <div class="row"><span class="lbl">Output device</span><span class="val" id="audioDev">System default</span></div>
+            <div class="row"><span class="lbl">Loudness normalization<div class="sub">Compressor + makeup gain on the WebAudio chain</div></span><div class="switch" data-set="normalize"></div></div>
+            <div class="row"><span class="lbl">Equalizer</span><div class="switch" data-set="eq"></div>
+              <select id="eqPreset">
+                <option value="flat">Flat</option><option value="bass">Bass boost</option><option value="voice">Vocal</option>
+                <option value="rock">Rock</option><option value="pop">Pop</option><option value="jazz">Jazz</option>
+                <option value="cinema">Cinema</option><option value="night">Night</option>
+              </select></div>
+            <div class="eq-wrap" id="eqBands"></div>
+            <div class="row"><span class="lbl">Audio tracks</span><select id="audioTracks"><option>—</option></select></div>
+          </div>
+
+          <!-- ---------------- subtitles ---------------- -->
+          <div class="sec"><h3>Subtitles</h3>
+            <div class="row"><span class="lbl">Style preset</span>
+              <div class="seg" data-set="subpreset">
+                <button data-v="default" class="on">Default</button><button data-v="minimal">Minimal</button>
+                <button data-v="cinema">Cinema</button><button data-v="large">Large</button><button data-v="box">Box</button>
+              </div></div>
+            <div class="row"><span class="lbl">Font</span>
+              <select id="setSubFont">
+                <option value="default">Default (the app font)</option>
+                <option value="segoe">Segoe UI</option>
+                <option value="tahoma">Tahoma</option>
+                <option value="iransans">IRANSans</option>
+                <option value="vazir">Vazirmatn</option>
+                <option value="naskh">Naskh / Times</option>
+                <option value="georgia">Georgia (serif)</option>
+                <option value="mono">Monospace</option>
+              </select></div>
+            <div class="row"><span class="lbl">Text colour</span>
+              <div class="swatches" id="subColors">
+                <button class="swatch on" data-c="#ffffff" style="background:#ffffff" title="White"></button>
+                <button class="swatch" data-c="#FFE680" style="background:#FFE680" title="Soft yellow"></button>
+                <button class="swatch" data-c="#7CF6C0" style="background:#7CF6C0" title="Mint"></button>
+                <button class="swatch" data-c="#FFB48A" style="background:#FFB48A" title="Peach"></button>
+                <button class="swatch" data-c="#9CCBFF" style="background:#9CCBFF" title="Sky"></button>
+                <button class="swatch" data-c="#FF9AA6" style="background:#FF9AA6" title="Rose"></button>
+                <input type="color" id="setSubColor" value="#ffffff" title="Any colour">
+              </div></div>
+            <div class="row"><span class="lbl">Shadow</span>
+              <div class="seg" data-set="subshadow">
+                <button data-v="soft" class="on">Soft</button><button data-v="hard">Hard</button>
+                <button data-v="glow">Glow</button><button data-v="none">None</button>
+              </div></div>
+            <div class="row"><span class="lbl">Outline</span>
+              <div class="seg" data-set="suboutline">
+                <button data-v="off" class="on">Off</button><button data-v="thin">Thin</button>
+                <button data-v="thick">Thick</button><button data-v="white">White</button>
+              </div></div>
+            <div class="row"><span class="lbl">Background</span>
+              <div class="seg seg-wrap" data-set="subbg">
+                <button data-v="none" class="on">None</button><button data-v="dark">Dark</button>
+                <button data-v="solid">Solid</button><button data-v="light">Light</button>
+                <button data-v="accent">Accent</button>
+              </div></div>
+            <div class="row"><span class="lbl">Bold text</span>
+              <div class="switch" data-set="subbold"></div></div>
+            <div class="row"><span class="lbl">Text size</span><input type="range" class="lr" id="setSubSize" min="16" max="72" step="1" value="34"><span class="val" id="setSubSizeVal">34</span></div>
+            <div class="row"><span class="lbl">Vertical position<div class="sub">Drag the subtitles on the video too</div></span><input type="range" class="lr" id="setSubPos" min="0" max="60" step="1" value="14"><span class="val" id="setSubPosVal">14%</span></div>
+            <div class="row"><span class="lbl">Delay</span>
+              <button class="btn" id="subDelayMinus">−0.5s</button><span class="val" id="subDelayVal">0 ms</span><button class="btn" id="subDelayPlus">+0.5s</button>
+              <button class="btn" id="subDelayReset">Reset</button></div>
+            <div class="row"><span class="lbl">Active subtitle</span><select id="subTracks"><option>Off</option></select></div>
+            <div class="row"><span class="lbl">Load subtitle file…</span><button class="btn accent" id="subLoadBtn">Browse</button></div>
+            <div class="row"><span class="lbl">Subtitle appearance</span>
+              <button class="btn" id="subResetBtn">Reset look</button></div>
+          </div>
+
+          <!-- ---------------- interface ---------------- -->
+          <div class="sec"><h3>Interface</h3>
+            <div class="row"><span class="lbl">Theme</span>
+              <div class="seg" data-set="theme">
+                <button data-v="dark" class="on">Dark</button><button data-v="light">Light</button><button data-v="black">Black</button></div></div>
+            <div class="row"><span class="lbl">Glass strength</span><input type="range" class="lr" id="setGlass" min="0" max="40" step="1" value="22"><span class="val" id="setGlassVal">22px</span></div>
+            <div class="row"><span class="lbl">Idle auto-hide delay</span><input type="range" class="lr" id="setIdle" min="0" max="12" step="0.5" value="2.6"><span class="val" id="setIdleVal">2.6s</span></div>
+            <div class="row"><span class="lbl">Low-resource mode<div class="sub">Fewer effects, same playback</div></span><div class="switch" data-set="lores"></div></div>
+            <div class="row"><span class="lbl">Context menu style</span>
+              <div class="seg" data-set="ctxstyle"><button data-v="auto" class="on">Auto</button><button data-v="classic">Classic</button><button data-v="touch">Large</button></div></div>
+            <div class="row"><span class="lbl">Always on top</span><div class="switch" data-set="ontop"></div></div>
+          </div>
+
+          <!-- ---------------- keys ---------------- -->
+          <div class="sec"><h3>Keyboard</h3>
+            <div class="row"><span class="lbl">Play / Pause</span><span><span class="kbd">Space</span> <span class="kbd">K</span></span></div>
+            <div class="row"><span class="lbl">Seek ± step</span><span><span class="kbd">←</span> <span class="kbd">→</span></span></div>
+            <div class="row"><span class="lbl">Volume / Mute</span><span><span class="kbd">↑</span> <span class="kbd">↓</span> <span class="kbd">M</span></span></div>
+            <div class="row"><span class="lbl">Zoom / Pan</span><span><span class="kbd">+</span> <span class="kbd">−</span> <span class="kbd">Ctrl+0</span> <span class="kbd">Alt+←→↑↓</span></span></div>
+            <div class="row"><span class="lbl">All shortcuts</span><button class="btn" id="showKeysBtn">Show</button></div>
+          </div>
+
+          <!-- ---------------- about page (last item in Settings) ---------------- -->
+          <div class="sec about-section" id="aboutPage">
+            <h3>About</h3>
+            <div class="about">
+              <span class="mark" id="aboutMark"></span>
+              <span class="n">Lumen — Liquid Glass Player</span>
+              <span class="v">Version 1.0.0 · Build r9-2026-10-04</span>
+              <div class="about-meta">
+                <div><span>Developer</span><strong>Behnam Ehsani</strong></div>
+                <div><span>Email</span><a id="aboutEmail" href="mailto:Inbox.ehsani@gmail.com">Inbox.ehsani@gmail.com</a></div>
+                <div><span>Media engine</span><strong>FFmpeg 9.0.2 · bundled</strong></div>
+              </div>
+              <div class="tags"><span class="chip" id="aboutChip1">UI: liquid glass</span><span class="chip" id="aboutChip2">Built-in media engine</span></div>
+              <span class="v about-note">Built with Electron, Chromium and FFmpeg. FFmpeg notices and license are included with the installed program.</span>
+            </div>
+          </div>
+
+        </div>
+      </aside>
+
+      <!-- ============ DOCK ============ -->
+      <footer class="dock" id="dock">
+        <div class="seekbar" id="seekbar" title="Seek">
+          <div class="track">
+            <div class="buffered" id="sbBuffered"></div>
+            <div class="chip-ab hidden" id="sbAB"></div>
+            <div class="played" id="sbPlayed"></div>
+            <i class="tick" id="sbTick" style="left:35%"></i>
+            <div class="thumb" id="sbThumb"></div>
+          </div>
+          <div class="tip" id="sbTip">00:00</div>
+        </div>
+        <div class="dock-row">
+          <button class="dbtn primary" id="btnPlay" data-tip="Play/Pause — Space"><span data-icon="play" data-size="22"></span></button>
+          <button class="dbtn" id="btnPrev" data-tip="Previous — Ctrl+←"><span data-icon="prev" data-size="19"></span></button>
+          <button class="dbtn" id="btnNext" data-tip="Next — Ctrl+→"><span data-icon="next" data-size="19"></span></button>
+          <div class="vol">
+            <button class="dbtn" id="btnMute" data-tip="Mute — M"><span data-icon="volume-high" data-size="19"></span></button>
+            <div class="rail" id="volRail" title="Volume"><div class="track"><div class="fill" id="volFill" style="width:65%"></div><div class="dot" id="volDot" style="left:65%"></div></div></div>
+          </div>
+          <span class="time"><span class="now" id="tNow">00:00</span> <span class="dur" id="tDur">/ 00:00</span></span>
+          <span class="chip" id="tSpeed" style="display:none">1×</span>
+          <div class="spacer"></div>
+          <button class="dbtn" id="btnSubs" data-tip="Subtitle tracks of this file — V"><span data-icon="subtitles" data-size="19"></span><span class="badge hidden" id="subsBadge">1</span></button>
+          <button class="dbtn" id="btnAudio" data-tip="Audio tracks of this file — B"><span data-icon="audio-track" data-size="19"></span></button>
+          <button class="dbtn" id="btnPlaylist" data-tip="Playlist — P" data-panel="playlist"><span data-icon="playlist" data-size="19"></span></button>
+          <button class="dbtn" id="btnSettings" data-tip="Settings — I" data-panel="settings"><span data-icon="settings" data-size="19"></span></button>
+          <button class="dbtn" id="btnFullscreen" data-tip="Fullscreen — F"><span data-icon="fullscreen" data-size="19"></span></button>
+        </div>
+      </footer>
+
+    </div><!-- /chrome -->
+
+    <!-- ============================ MINI PLAYER BAR ============================ -->
+    <div class="mini-bar" id="miniBar">
+      <button class="dbtn primary" id="miniPlay"><span data-icon="play" data-size="20"></span></button>
+      <span class="mtitle" id="miniTitle">Lumen</span>
+      <div class="mbar" id="miniBar2"><i id="miniFill"></i></div>
+      <span class="mtime" id="miniTime">00:00 / 00:00</span>
+      <button class="dbtn" id="miniRestore" title="Restore"><span data-icon="fullscreen" data-size="18"></span></button>
+      <button class="dbtn" id="miniClose" title="Close"><span data-icon="close" data-size="18"></span></button>
+    </div>
+
+    <!-- ============================ OVERLAYS ============================ -->
+    <div class="ctx" id="ctxMenu" role="menu"></div>
+    <div class="toasts" id="toasts"></div>
+    <div class="modal-bd" id="modalBd"><div class="modal" id="modal"></div></div>
+
+    <div class="demo-ribbon">
+      <span class="dot"></span>
+      <span><b>Demo mode</b> — no desktop host attached, so this is the design UI with sample scenes and browser file playback.</span>
+      <button class="btn" data-scene-btn="bright">Bright</button>
+      <button class="btn" data-scene-btn="dark">Dark</button>
+      <button class="btn" data-demo-fade>Fade controls</button>
+    </div>
+
+    <!-- frameless-window resize grips (windowed mode only) -->
+    <div class="grips" id="grips">
+      <i data-dir="n"></i><i data-dir="s"></i><i data-dir="w"></i><i data-dir="e"></i>
+      <i data-dir="nw"></i><i data-dir="ne"></i><i data-dir="sw"></i><i data-dir="se"></i>
+    </div>
+
+  </div><!-- /win -->
+</div><!-- /stage -->
+
+<input type="file" id="localFilePick" accept="video/*,audio/*,.mkv,.m4v,.webm,.mp4,.srt,.vtt,.ass,.ssa,.m3u8,.m3u" multiple hidden>
+
+<script src="_icons.js"></script>
+<script src="app-icons.js"></script>
+<script src="app.js"></script>
+<script src="ui.js"></script>
+<script src="shell.js"></script>
+</body>
+</html>

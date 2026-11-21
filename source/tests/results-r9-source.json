@@ -1,0 +1,69 @@
+{
+  "revision": "R9",
+  "buildId": "r9-2026-10-04",
+  "testDate": "2026-10-04",
+  "environment": {
+    "platform": "Linux x64 sandbox",
+    "node": "v20.20.0",
+    "windowsBatExecuted": false,
+    "electronUiHarnessExecuted": false
+  },
+  "results": [
+    {
+      "suite": "sidecar matcher and external SRT extraction",
+      "passed": 8,
+      "total": 8
+    },
+    {
+      "suite": "Settings, bridge parity, shortcuts, delete safety, volume and performance static checks",
+      "passed": 13,
+      "total": 13,
+      "covers": [
+        "preload.js METHOD list matches main.js handlers and every renderer call",
+        "PageDown/PageUp wrap through the playlist and Delete trashes + continues",
+        "media_delete uses shell.trashItem and purges resume/subs/playlist state",
+        "playlist painting is coalesced, signature-cached and O(n)",
+        "hydrate no longer registers/probes every file",
+        "closed panels and hidden overlays are visibility:hidden; no idle animations",
+        "mute keeps the remembered level; [ and ] change the speed"
+      ]
+    },
+    {
+      "suite": "headless renderer checks (jsdom: index.html + app.js/ui.js/shell.js)",
+      "passed": 8,
+      "total": 8,
+      "note": "Requires the optional jsdom dev dependency; skips cleanly without it."
+    },
+    {
+      "suite": "interaction smoke test (jsdom: transport, panels, settings, volume, search, modal, menu, modes)",
+      "passed": 12,
+      "total": 12,
+      "note": "Fails on any uncaught renderer error; requires the optional jsdom dependency."
+    },
+    {
+      "suite": "Node syntax checks",
+      "passed": 9,
+      "total": 9
+    },
+    {
+      "suite": "real Electron/Windows run (installer, ui.trashItem, hardware keys)",
+      "passed": null,
+      "total": null,
+      "note": "Not run: this sandbox is Linux. shell.trashItem and the installer still need one confirmation on Windows."
+    }
+  ],
+  "allExecutedTestsPassed": true,
+  "hotfix": {
+    "date": "2026-11-21",
+    "summary": "Shortcut + performance pass on the R9 source tree (same build id r9-2026-10-04).",
+    "changes": [
+      "transcode_start restored to the preload whitelist (the FFmpeg fallback was unreachable)",
+      "PageDown/PageUp skip playlist items (wrapping); Delete trashes the played file and continues",
+      "playlist paint batching/cache, O(n) index lookup, scroll preserved",
+      "no per-file probing on hydrate",
+      "hidden glass surfaces removed from the render tree; idle spinner/equaliser animations fixed",
+      "real low-resource mode, bounded metadata caches, debounced config writes, ETag/304 statics",
+      "mute no longer zeroes the remembered volume; [ and ] speed keys work again"
+    ]
+  }
+}

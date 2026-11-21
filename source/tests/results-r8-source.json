@@ -1,0 +1,65 @@
+{
+  "revision": "R8",
+  "buildId": "r8-2026-10-04",
+  "testDate": "2026-10-04",
+  "environment": {
+    "platform": "Linux x64 sandbox",
+    "node": "v20.20.0",
+    "windowsBuildExecuted": false,
+    "electronUiHarnessExecuted": false
+  },
+  "results": [
+    {
+      "suite": "sidecar matcher and extraction",
+      "passed": 8,
+      "total": 8,
+      "cases": [
+        "exact basename in a multi-media folder",
+        "external SRT converts to WebVTT without FFmpeg",
+        "different filename with matching episode number",
+        "Unicode/Persian letters and Persian digits",
+        "unmatched sidecar in a cluttered one-media folder",
+        "sidecars in a conventional Subs subfolder",
+        "reject unrelated subtitle in an ambiguous multi-media folder",
+        "reject plain text notes as subtitles"
+      ]
+    },
+    {
+      "suite": "Settings/source/BAT static checks",
+      "passed": 7,
+      "total": 7,
+      "cases": [
+        "sample Preview row absent",
+        "Reset look retained and bound",
+        "actual subtitle styling/rendering retained",
+        "external sidecars preserved across embedded probe completion",
+        "renderer sidecar merging is case-insensitive and idempotent",
+        "NSIS discovery uses where.exe/PATH and Program Files on Windows",
+        "R8 BAT build ID/output and Node/NSIS prerequisites are aligned"
+      ]
+    },
+    {
+      "suite": "Node syntax checks",
+      "passed": 9,
+      "total": 9,
+      "files": [
+        "host/ffmpeg.js",
+        "main.js",
+        "web/app.js",
+        "web/shell.js",
+        "tools/build-windows.js",
+        "tools/build-installer.js",
+        "tests/harness-round7.js",
+        "tests/test-sidecar-matcher.js",
+        "tests/test-source-ui.js"
+      ]
+    },
+    {
+      "suite": "Windows BAT/build",
+      "passed": null,
+      "total": null,
+      "note": "The Windows BAT and installer were not executable in the Linux sandbox. BAT syntax/runtime and actual Windows installation remain unverified; request the user's complete error text or screenshot to diagnose the reported BAT error precisely."
+    }
+  ],
+  "allExecutedTestsPassed": true
+}

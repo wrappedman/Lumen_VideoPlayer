@@ -1,0 +1,151 @@
+{
+  "results": [
+    {
+      "name": "Open URL prefills and selects clipboard text",
+      "ok": true,
+      "details": {
+        "exists": true,
+        "value": "https://media.example.test/movie/master.m3u8",
+        "selected": "https://media.example.test/movie/master.m3u8",
+        "cutCopyPasteHook": false
+      }
+    },
+    {
+      "name": "link-field context menu performs Cut / Copy / Paste",
+      "ok": true,
+      "details": {
+        "labels": [
+          "Cut",
+          "Copy",
+          "Paste"
+        ],
+        "copy": true,
+        "copied": "copy",
+        "cut": true,
+        "cutValue": "https://example.test/clip.mp4",
+        "cutClipboard": "copy",
+        "paste": true,
+        "pastedValue": "https://paste.example.test/live.m3u8https://example.test/clip.mp4"
+      }
+    },
+    {
+      "name": "About has the exact developer, email and R7/version details",
+      "ok": true,
+      "details": {
+        "about": "About Lumen — Liquid Glass Player Version 1.0.0 · Build r7-2026-10-04 DeveloperBehnam Ehsani EmailInbox.ehsani@gmail.com Media engineFFmpeg 9.0.2 · bundled UI: liquid glassFFmpeg ready Built with Electron, Chromium and FFmpeg. FFmpeg notices and license are included with the installed program.",
+        "email": "mailto:Inbox.ehsani@gmail.com",
+        "poster": "assets/scene_cinema.jpg",
+        "posterLoaded": true,
+        "posterWidth": 1376,
+        "screenshotIcon": false,
+        "engine": {
+          "available": true,
+          "path": "ffmpeg",
+          "version": "7.1.5-0+deb13u1",
+          "bundled": false
+        }
+      }
+    },
+    {
+      "name": "dark cinematic artwork loads as the default scene",
+      "ok": true,
+      "details": {
+        "about": "About Lumen — Liquid Glass Player Version 1.0.0 · Build r7-2026-10-04 DeveloperBehnam Ehsani EmailInbox.ehsani@gmail.com Media engineFFmpeg 9.0.2 · bundled UI: liquid glassFFmpeg ready Built with Electron, Chromium and FFmpeg. FFmpeg notices and license are included with the installed program.",
+        "email": "mailto:Inbox.ehsani@gmail.com",
+        "poster": "assets/scene_cinema.jpg",
+        "posterLoaded": true,
+        "posterWidth": 1376,
+        "screenshotIcon": false,
+        "engine": {
+          "available": true,
+          "path": "ffmpeg",
+          "version": "7.1.5-0+deb13u1",
+          "bundled": false
+        }
+      }
+    },
+    {
+      "name": "screenshot icon/feature is absent",
+      "ok": true,
+      "details": {
+        "screenshotIcon": false
+      }
+    },
+    {
+      "name": "desktop host reports a working media engine",
+      "ok": true,
+      "details": {
+        "available": true,
+        "path": "ffmpeg",
+        "version": "7.1.5-0+deb13u1",
+        "bundled": false
+      }
+    },
+    {
+      "name": "right-click main menu has the requested order and no removed rows (desktop + touch)",
+      "ok": true,
+      "details": {
+        "desktop": {
+          "sequence": [
+            "Open file…",
+            "Open folder…",
+            "Open URL / stream…",
+            "<sep>",
+            "Always on top",
+            "Mini player",
+            "Fullscreen",
+            "Picture in picture",
+            "Playlist panel",
+            "<sep>",
+            "Media info…",
+            "<sep>",
+            "Exit Lumen"
+          ],
+          "labels": [
+            "Open file…",
+            "Open folder…",
+            "Open URL / stream…",
+            "Always on top",
+            "Mini player",
+            "Fullscreen",
+            "Picture in picture",
+            "Playlist panel",
+            "Media info…",
+            "Exit Lumen"
+          ]
+        },
+        "touch": {
+          "sequence": [
+            "Open file…",
+            "Open folder…",
+            "Open URL / stream…",
+            "<sep>",
+            "Always on top",
+            "Mini player",
+            "Fullscreen",
+            "Picture in picture",
+            "Playlist panel",
+            "<sep>",
+            "Media info…",
+            "<sep>",
+            "Exit Lumen"
+          ],
+          "labels": [
+            "Open file…",
+            "Open folder…",
+            "Open URL / stream…",
+            "Always on top",
+            "Mini player",
+            "Fullscreen",
+            "Picture in picture",
+            "Playlist panel",
+            "Media info…",
+            "Exit Lumen"
+          ]
+        }
+      }
+    }
+  ],
+  "consoleErrors": [],
+  "allok": true
+}

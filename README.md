@@ -13,7 +13,7 @@
 
 </div>
 
-> **محتوای این مخزن:** سورس Revision 9 در فایل ZIP قرار دارد. این ZIP فقط پوشهٔ سورس را شامل می‌شود و **EXE، نصاب یا خروجی build ندارد**؛ برای ساخت برنامه باید مراحل پایین را روی Windows اجرا کنید.
+> **محتوای این مخزن:** سورس Revision 9 هم به‌صورت پوشهٔ [`source/`](./source) و هم در فایل [`Lumen-source-r9.zip`](./Lumen-source-r9.zip) قرار دارد (هر دو یکسان و به‌روز هستند). بسته **EXE، نصاب یا خروجی build ندارد**؛ برای ساخت برنامه باید مراحل پایین را روی Windows اجرا کنید.
 
 ---
 
@@ -35,6 +35,8 @@
 - 🪟 **حالت‌های نمایش:** تمام‌صفحه، Mini player، Picture in Picture و Always on top.
 - 📚 **فهرست و کنترل پخش:** فهرست پخش، جست‌وجو، ادامهٔ پخش، سرعت، صدا، تِم‌ها و کنترل‌های لمسی.
 - 🖱️ **تعامل دسکتاپ:** منوی راست‌کلیک، میان‌برها و دیالوگ Open URL با Cut/Copy/Paste.
+- ⌨️ **میان‌برهای تازه:** `PageDown` / `PageUp` رفتن به ویدیوی بعدی/قبلی (با چرخش دور فهرست) و `Delete` انتقال فایل در حال پخش به **Recycle Bin** و پخش فوری ویدیوی بعدی. اگر فهرست فقط یک آیتم داشته باشد، فایل حذف نمی‌شود.
+- ⚡ **سبک و سریع:** رسم تجمیعی فهرست پخش، بدون ffprobe برای هر فایل هنگام شروع، حذف کامل لایه‌های شیشه‌ای نامرئی از رندر، حالت کم‌مصرف واقعی، و رفع باگ مسیر FFmpeg (`transcode_start`).
 
 ### فرمت‌ها و محدودیت‌ها
 
@@ -79,13 +81,22 @@ node tests/test-sidecar-matcher.js
 node tests/test-source-ui.js
 ```
 
+```bash
+# jsdom فقط برای آزمون رابط لازم است و اختیاری است
+npm install --no-save jsdom
+node tests/test-keyboard-renderer.js
+node tests/test-ui-smoke.js
+```
+
 - آزمون تطبیق و استخراج زیرنویس: **۸/۸**.
-- بررسی ساختاری Settings، ادغام ترک‌ها، NSIS و fallback مربوط به BAT: **۷/۷**.
+- بررسی ساختاری Settings، هم‌خوانی پل دسکتاپ، میان‌برها، حذف امن فایل و تضمین‌های عملکرد: **۱۳/۱۳**.
+- آزمون رابط بدون مرورگر (jsdom) برای `PageDown`/`PageUp`/`Delete` و عملکرد فهرست پخش: **۸/۸**.
+- آزمون تعاملی رابط (پنل‌ها، تنظیمات، ولوم، جست‌وجو، میان‌برها، تغییر mode): **۱۲/۱۲**.
 - گزارش جزئی و محدودیت‌های محیط در `source/tests/results-r9-source.json` ثبت شده است. BAT و نصب نهایی باید روی Windows واقعی هم اجرا و تأیید شوند.
 
 ## 📦 وضعیت Revision 9
 
-R9 شامل اصلاح تشخیص زیرنویس‌های کناری و حذف Preview از Settings است و خطای Schannel در دانلود build را نیز پوشش می‌دهد. شناسهٔ ساخت: `r9-2026-10-04`.
+R9 شامل اصلاح تشخیص زیرنویس‌های کناری و حذف Preview از Settings است و خطای Schannel در دانلود build را نیز پوشش می‌دهد. شناسهٔ ساخت: `r9-2026-10-04`. یک پاس اصلاحی (میان‌برهای `PageDown`/`PageUp`/`Delete`، رفع باگ پل FFmpeg و بهینه‌سازی عملکرد) روی همین سورس اعمال شده و ZIP به‌روز شده است.
 
 ## ⚖️ مجوزها
 
@@ -105,6 +116,8 @@ R9 شامل اصلاح تشخیص زیرنویس‌های کناری و حذف P
 
 ### Highlights
 
+- **New keys:** `PageDown` / `PageUp` jump to the next / previous item (wrapping), and `Delete` moves the file that was playing to the **Recycle Bin** and immediately continues with the next item (never when it is the only item).
+- **Lighter and faster:** batched playlist painting, no per-file probing at startup, invisible glass layers removed from the render tree, a real low-resource mode, and the FFmpeg bridge bug (`transcode_start`) fixed.
 - Local files and folders, URL/stream input, playlists, and selected HLS streams.
 - Embedded, sidecar, and online subtitles; R8/R9 improve Unicode/Persian filename matching, cluttered single-media folders, and common `Subs` folders.
 - Subtitle font, size, color, shadow, outline, background, position, and delay controls. The Settings sample Preview is removed; **Reset look** remains.
@@ -119,4 +132,4 @@ The BAT retries a Schannel download failure such as `CRYPT_E_REVOCATION_OFFLINE`
 
 ### Tests and licensing
 
-Run `node tests/test-sidecar-matcher.js` and `node tests/test-source-ui.js` from `source/`. The application license is declared MIT; the FFmpeg build is separately identified as GPLv3. Review the accompanying notices and corresponding-source obligations before redistribution.
+Run `node tests/test-sidecar-matcher.js` and `node tests/test-source-ui.js` from `source/` (8/8 and 13/13). The optional `node tests/test-keyboard-renderer.js` needs `npm install --no-save jsdom` and runs the real UI headlessly (8/8 + 12 interaction checks). The application license is declared MIT; the FFmpeg build is separately identified as GPLv3. Review the accompanying notices and corresponding-source obligations before redistribution.
