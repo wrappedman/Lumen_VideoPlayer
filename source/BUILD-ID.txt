@@ -1,0 +1,22 @@
+Lumen 1.0.0 · Build-ID: r9-2026-10-04
+Revision: R9 (source-only hotfix)
+Artifact: Source tree only; this archive includes no EXE, installer, or build output.
+Build date: 2026-10-04 (Asia/Tehran)
+
+R9 hotfix:
+- Windows build BAT retries FFmpeg and Electron downloads with curl --ssl-no-revoke
+  only when normal Schannel TLS verification fails. Certificate-chain and hostname
+  validation remain enabled; each archive's pinned SHA-256 is checked before use.
+- NSIS discovery accepts PATH and standard Program Files locations.
+- Build documentation and script defaults use Node.js 22.12+, R9 output paths, and
+  Build-ID r9-2026-10-04.
+
+R9 includes the R8 application-source corrections:
+- Unicode/Persian-aware sidecar subtitle matching, cluttered one-media folders,
+  common Subs folders, rejection of conflicting episodes/ambiguous unrelated tracks.
+- Settings sample Preview removed while subtitle styling and Reset look remain.
+- Sidecar tracks retained when the slower embedded-track probe completes.
+
+Build target: Windows x64, Electron 44.5.1 and the pinned FFmpeg 9.0.2 essentials
+archive. Runtime acquisition is build-time only; Lumen does not download or install
+FFmpeg while running. The source ZIP itself contains no executable build artifacts.

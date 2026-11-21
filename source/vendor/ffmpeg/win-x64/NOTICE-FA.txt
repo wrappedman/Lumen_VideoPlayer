@@ -1,0 +1,19 @@
+اطلاعیه‌ی رسانه‌ی همراه Lumen
+==============================
+
+این نسخه‌ی ویندوزی Lumen شامل FFmpeg 9.0.2 (نسخه‌ی essentials، ۶۴ بیتی، ایستا)
+از Gyan.dev است و ffmpeg.exe/ffprobe.exe را در resources/ffmpeg/bin به‌کار می‌گیرد.
+این برنامه‌ی جداگانه تحت مجوز GPL نسخه‌ی ۳ توزیع شده است؛ نسخه‌ی کامل مجوز در
+LICENSE.GPL-3.0.txt و گزارش بیلد/فهرست اجزا در README-upstream.txt قرار دارد.
+
+کد منبع FFmpeg مطابق گزارش سازنده:
+https://github.com/FFmpeg/FFmpeg/commit/946fcce07b
+صفحه‌ی بیلد سازنده:
+https://www.gyan.dev/ffmpeg/builds/
+
+SHA-256 بسته‌ی دقیقِ مورد استفاده در Build-ID r7:
+60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba
+
+این فایل اجرایی از پیش‌ساخته به‌عنوان یک پردازه‌ی جداگانه اجرا می‌شود؛ سورس،
+پیکربندی و اطلاعات مجوز آن در پوشه‌ی FFmpeg نصب‌شده قرار گرفته است.
+برای اطلاعات کامل مجوزها، README-upstream.txt و LICENSE.GPL-3.0.txt را بخوانید.

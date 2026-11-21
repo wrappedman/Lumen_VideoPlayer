@@ -1,0 +1,50 @@
+/* ==========================================================================
+   Lumen — desktop.css
+   Adjustments that only apply when the player runs inside the desktop host
+   (Electron). The OS window *is* the frame there, so the "windowed card"
+   treatment of the mockup (rounded corner, outline, drop shadow) is dropped
+   and the real window takes over. Everything else stays pixel-identical.
+   ========================================================================== */
+
+html.desktop-host body.mode-window .win,
+html.desktop-host body.mode-max .win,
+html.desktop-host body.mode-full .win,
+html.desktop-host body.mode-mini .win {
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+}
+html.desktop-host body.mode-window .video-stack { border-radius: 0; }
+html.desktop-host body.mode-window .win::after { display: none; }
+
+/* the desktop backdrop / vignette only exists for the browser mockup */
+html.desktop-host .stage { background: #0b0d13; }
+html.desktop-host .stage::after { display: none; }
+
+/* there is always a host attached here — the demo ribbon is browser-only */
+html.desktop-host .demo-ribbon { display: none !important; }
+
+/* the window edge itself is the drag handle; keep the cursor honest */
+html.desktop-host body { cursor: default; }
+html.desktop-host .grips i { z-index: 70; }
+
+/* --------------------------------------------------------------- dragging */
+/* Inside the desktop host the title bar is a *native* drag region: the OS
+   moves the window (smooth, snapped, multi-monitor aware) instead of JS
+   arithmetic on screen coordinates. Interactive controls stay clickable. */
+html.desktop-host .winbar,
+html.desktop-host .titlebar { -webkit-app-region: drag; }
+/* the mini player has no title bar: the whole strip moves the window, the
+   controls inside it stay clickable */
+html.desktop-host .mini-bar { -webkit-app-region: drag; }
+html.desktop-host .mini-bar .dbtn,
+html.desktop-host .mini-bar .mbar,
+html.desktop-host .mini-bar .mtitle { -webkit-app-region: no-drag; }
+html.desktop-host .winbar .tb-btn,
+html.desktop-host .titlebar .tb-btn,
+html.desktop-host .titlebar .tb-file,
+html.desktop-host .titlebar .chip,
+html.desktop-host .titlebar .mark { -webkit-app-region: no-drag; }
+
+/* the top resize grip must never sit on top of the window buttons */
+html.desktop-host .grips i[data-dir="n"] { right: 240px; }

@@ -1,0 +1,543 @@
+/* ==========================================================================
+   Lumen — app.css
+   Application layer on top of the original design system (lumen.css).
+   Nothing here changes the design language: same tokens, same glass, same
+   motion (--ease / --t-fast / --t-med / --t-slow). It only adds what a real
+   player needs: real window chrome, context menu, zoom/pan layer, subtitles,
+   toasts, modal, mini-player, drop target, resize grips.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- root/body */
+html, body { height: 100%; margin: 0; background: transparent; }
+body { overflow: hidden; touch-action: none; }
+body.mode-window, body.mode-max { background: transparent; }
+body.mode-window .stage, body.mode-max .stage, body.mode-full .stage {
+  background: transparent; padding: 0;
+}
+body.mode-full .stage { background: #000; }
+
+:root {
+  --ctx-w: 288px;
+  --tb-h: 44px;
+  --win-h: 34px;
+  --grip: 6px;
+}
+
+/* ============================== WINDOW SHELL ============================== */
+/* The OS window is frameless + transparent; .win is the visible app surface. */
+.mode-window .win,
+.mode-max .win,
+.mode-full .win,
+.mode-mini .win {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  max-width: none; max-height: none; aspect-ratio: auto;
+  border-radius: 0;
+  box-shadow: none; outline: none;
+}
+.mode-window .win {   /* the inline transform stays free for the drag fallback */
+  transition: transform var(--t-fast) var(--ease);
+  border-radius: var(--radius-win);
+  outline: 1px solid var(--stroke);
+  box-shadow: 0 26px 70px rgba(0,0,0,.55), 0 2px 10px rgba(0,0,0,.4), inset 0 1px 0 var(--hl);
+}
+.mode-mini .win { border-radius: 14px; outline: 1px solid var(--stroke); box-shadow: 0 20px 50px rgba(0,0,0,.55); }
+
+/* rounded clipping of the video for the windowed shell */
+.mode-window .video-stack { border-radius: var(--radius-win); }
+.mode-window .win::after { /* hairline highlight, keeps the glass edge crisp */
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  box-shadow: inset 0 1px 0 var(--hl); z-index: 60;
+}
+
+/* resize grips — only in windowed mode (frameless windows are not OS-resizable) */
+.grips { position: absolute; inset: 0; z-index: 55; pointer-events: none; }
+.grips i { position: absolute; display: block; pointer-events: auto; }
+.grips i[data-dir="n"]  { top: 0; left: 10px; right: 10px; height: var(--grip); cursor: n-resize; }
+.grips i[data-dir="s"]  { bottom: 0; left: 10px; right: 10px; height: var(--grip); cursor: s-resize; }
+.grips i[data-dir="w"]  { left: 0; top: 10px; bottom: 10px; width: var(--grip); cursor: w-resize; }
+.grips i[data-dir="e"]  { right: 0; top: 10px; bottom: 10px; width: var(--grip); cursor: e-resize; }
+.grips i[data-dir="nw"] { left: 0; top: 0; width: 14px; height: 14px; cursor: nw-resize; }
+.grips i[data-dir="ne"] { right: 0; top: 0; width: 14px; height: 14px; cursor: ne-resize; }
+.grips i[data-dir="sw"] { left: 0; bottom: 0; width: 14px; height: 14px; cursor: sw-resize; }
+.grips i[data-dir="se"] { right: 0; bottom: 0; width: 14px; height: 14px; cursor: se-resize; }
+.mode-max .grips, .mode-full .grips, .mode-mini .grips { display: none; }
+
+/* ============================== TITLE BAR ============================== */
+.titlebar { -webkit-app-region: no-drag; }
+.tb-brand .mark svg { width: 19px; height: 19px; display: block; }
+.tb-file { max-width: 46%; }
+.tb-btn.on { color: var(--accent); }
+.tb-title { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.tb-hint { font-size: 11px; color: var(--text-dim); margin-left: 8px; }
+.mode-full .titlebar, .mode-mini .titlebar,
+.mode-full .winbar, .mode-mini .winbar { display: none; }
+.titlebar .tb-spacer { flex: 1; }
+.titlebar .tb-btn { border-radius: 8px; }
+.titlebar .tb-btn.close:hover { border-top-right-radius: var(--radius-win); }
+
+/* ============================== CENTER PLAY ============================== */
+/* lumen.css makes the center button interactive; that would steal taps and
+   long-presses from the middle of the picture. It stays visual only — the
+   click / double-click / long-press logic lives on .video-stack. */
+/* the big play button must really work — it just must not swallow the touch
+   gestures that live on the picture behind it */
+.chrome .center-play { pointer-events: auto !important; }
+body.touch .chrome .center-play { pointer-events: none !important; }
+/* while playing the button is invisible; hovering the middle brings it back
+   (the .center-hover class is toggled by the pointer tracker in ui.js) */
+body.playing:not(.center-hover) .chrome .center-play { pointer-events: none !important; }
+.center-play.hover,
+.chrome .center-play:hover { transform: translate(-50%, -50%) scale(1.05); background-color: rgba(44,46,56,.40); }
+.center-play.hover:active { transform: translate(-50%, -50%) scale(.97); }
+
+/* ============================== VIDEO STACK ============================== */
+.video-stack { touch-action: none; overflow: hidden; }
+.zoomer {
+  position: absolute; inset: 0;
+  transform-origin: 50% 50%;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+.zoomer img.vlayer, .zoomer video.vlayer {
+  position: absolute; inset: 0; width: 100%; height: 100%; opacity: 1;
+  transition: opacity var(--t-slow) var(--ease);
+}
+.zoomer img.vlayer { object-fit: cover; }
+.zoomer video.vlayer {
+  object-fit: contain; background: #000; display: none;
+}
+html.has-media .zoomer video.vlayer { display: block; }
+html.has-media .zoomer img.vlayer { display: none; }
+/* demo (no bridge, no real media) — scenes behave exactly like the mockup */
+.zoomer img.vlayer.on { opacity: 1; }
+.zoomer img.vlayer { opacity: 0; }
+html.has-media .zoomer img.vlayer { opacity: 0; }
+
+/* aspect / fit modes for the real video */
+html.fit-contain .zoomer video.vlayer { object-fit: contain; }
+html.fit-cover   .zoomer video.vlayer { object-fit: cover; }
+html.fit-fill    .zoomer video.vlayer { object-fit: fill; }
+html.fit-16-9    .zoomer video.vlayer { aspect-ratio: 16/9 !important; }
+.zoomer video.vlayer { object-position: center center; }
+
+.stack-busy .loading { opacity: 1; }
+.loading { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; pointer-events: none;
+  transition: opacity var(--t-fast) var(--ease); z-index: 12; background: rgba(0,0,0,.18); }
+.loading i.spinner {
+  width: 42px; height: 42px; display: block; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.22); border-top-color: var(--accent);
+  /* the spinner used to run 60 fps forever, even at opacity 0 */
+}
+.stack-busy .loading i.spinner { animation: spin 720ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* zoom badge + hint */
+.zoom-badge {
+  position: absolute; left: 16px; top: 16px; z-index: 30;
+  display: flex; align-items: center; gap: 7px; padding: 7px 11px;
+  border-radius: 12px; background: var(--panel); border: 1px solid var(--stroke);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: 0 10px 26px rgba(0,0,0,.35), inset 0 1px 0 var(--hl);
+  color: var(--text); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+  opacity: 0; transform: translateY(-6px); pointer-events: none;
+  visibility: hidden;                 /* no backdrop-filter work while hidden */
+  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease), visibility var(--t-med);
+}
+.zoom-badge.show { opacity: 1; transform: none; visibility: visible; }
+.zoom-badge .hint { font-size: 10.5px; font-weight: 500; color: var(--text-sub); }
+.mode-full .zoom-badge { top: 66px; }
+
+/* swipe-to-seek preview */
+.scrub-preview {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(.94);
+  z-index: 32; display: flex; align-items: center; gap: 10px; padding: 12px 18px;
+  border-radius: 16px; background: var(--panel-strong); border: 1px solid var(--stroke);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: 0 18px 44px rgba(0,0,0,.45), inset 0 1px 0 var(--hl);
+  color: var(--text); opacity: 0; pointer-events: none; visibility: hidden;
+  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease), visibility var(--t-fast);
+}
+.scrub-preview.show { opacity: 1; transform: translate(-50%, -50%) scale(1); visibility: visible; }
+.scrub-preview .big { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.scrub-preview .sub { font-size: 11px; color: var(--text-sub); }
+.scrub-preview svg { width: 22px; height: 22px; color: var(--text-sub); }
+
+/* drop target */
+.drop-hint {
+  position: absolute; inset: 12px; z-index: 45; border-radius: 16px;
+  border: 2px dashed rgba(255,255,255,.5); background: rgba(10,12,18,.42);
+  backdrop-filter: blur(8px); display: grid; place-items: center; gap: 10px;
+  color: #fff; font-size: 15px; font-weight: 600; text-align: center;
+  opacity: 0; pointer-events: none; visibility: hidden;
+  transition: opacity var(--t-fast) var(--ease), visibility var(--t-fast);
+}
+.drop-hint .sub { font-size: 12px; font-weight: 500; color: rgba(255,255,255,.75); }
+.drop-hint .box { display: grid; place-items: center; gap: 8px; }
+.drop-hint svg { width: 40px; height: 40px; }
+.stack.drop .drop-hint { opacity: 1; visibility: visible; }
+
+/* cursor states */
+.stack.grabbing { cursor: grabbing; }
+.stack.grab { cursor: grab; }
+.stack.pan-ready { cursor: grab; }
+.idle .stack.pan-ready { cursor: none; }
+
+/* ============================== SUBTITLES ============================== */
+.subs-layer {
+  position: absolute; inset: 0; z-index: 28; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  padding: 0 6% 88px; gap: 4px;
+}
+.mode-full .subs-layer, .mode-max .subs-layer { padding-bottom: 110px; }
+.idle .subs-layer { transition: padding var(--t-med) var(--ease); }
+.sub-line {
+  display: inline-block; max-width: 92%;
+  text-align: center; line-height: 1.32; white-space: pre-wrap;
+  text-wrap: balance;
+  color: #fff; font-weight: 600;
+  text-shadow: 0 2px 10px rgba(0,0,0,.85), 0 0 2px rgba(0,0,0,.9);
+  padding: 2px 8px; border-radius: 8px;
+}
+.subs-default .sub-line { font-size: var(--sub-size, 34px); }
+.subs-minimal .sub-line { font-size: calc(var(--sub-size, 34px) * .9); font-weight: 500; background: rgba(0,0,0,.34); }
+.subs-cinema .sub-line {
+  font-size: calc(var(--sub-size, 34px) * .95); font-family: "Segoe UI Variable Display", Georgia, serif;
+  letter-spacing: .3px; background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,.12));
+  box-shadow: 0 6px 20px rgba(0,0,0,.35);
+}
+.subs-large .sub-line { font-size: calc(var(--sub-size, 34px) * 1.28); font-weight: 700; }
+.subs-box .sub-line { background: rgba(0,0,0,.62); }
+.sub-line.dragging { cursor: grabbing; }
+/* a segment row with five options must be allowed to wrap in the side panel */
+.seg.seg-wrap { flex-wrap: wrap; justify-content: flex-end; }
+
+/* colour swatch picker for subtitle text */
+.swatches { display: flex; align-items: center; gap: 7px; }
+.swatches .swatch {
+  width: 22px; height: 22px; border-radius: 50%; padding: 0; cursor: pointer;
+  border: 2px solid rgba(255,255,255,.28); box-shadow: 0 1px 4px rgba(0,0,0,.4);
+  transition: transform var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.swatches .swatch:hover { transform: scale(1.12); }
+.swatches .swatch.on { border-color: var(--accent); transform: scale(1.14); }
+.swatches input[type="color"] {
+  width: 30px; height: 24px; padding: 0; border: 1px solid var(--stroke);
+  border-radius: 7px; background: var(--chip); cursor: pointer;
+}
+/* the mini player is a drag handle in its own right (see desktop.css) */
+.mini-bar .mtitle { cursor: grab; }
+
+/* ============================== CONTEXT MENU ============================== */
+.ctx {
+  position: absolute; z-index: 100; width: var(--ctx-w);
+  padding: 8px; border-radius: 16px;
+  background: var(--panel-strong); border: 1px solid var(--stroke);
+  backdrop-filter: blur(30px) saturate(var(--glass-sat));
+  box-shadow: 0 26px 64px rgba(0,0,0,.55), inset 0 1px 0 var(--hl);
+  color: var(--text);
+  opacity: 0; transform: scale(.97) translateY(-4px); transform-origin: top left;
+  pointer-events: none; visibility: hidden;
+  transition: opacity 130ms var(--ease), transform 130ms var(--ease), visibility 130ms;
+}
+.ctx.open { opacity: 1; transform: none; pointer-events: auto; visibility: visible; }
+.ctx.touch { width: 320px; }
+.ctx .mi {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 8px 10px; border: none; background: transparent; color: var(--text);
+  font: inherit; font-size: 12.5px; font-weight: 500; text-align: left;
+  border-radius: 10px; cursor: pointer; position: relative;
+}
+.ctx.touch .mi { padding: 12px 12px; font-size: 13.5px; }
+.ctx .mi:hover, .ctx .mi.focus { background: var(--chip-hover); }
+.ctx .mi[disabled] { opacity: .38; pointer-events: none; }
+.ctx .mi .ic { width: 18px; height: 18px; flex: none; display: grid; place-items: center; color: var(--text-sub); }
+.ctx .mi:hover .ic, .ctx .mi.focus .ic { color: var(--text); }
+.ctx .mi .ic svg { width: 17px; height: 17px; display: block; }
+.ctx .mi .lbl { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx .mi .acc { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ctx .mi .arrow { width: 14px; height: 14px; color: var(--text-dim); }
+.ctx .mi .mark { width: 16px; color: var(--accent); display: grid; place-items: center; }
+.ctx .mi .mark svg { width: 15px; height: 15px; }
+.ctx .mi.on { color: var(--text); }
+.ctx .mi.on .lbl { font-weight: 600; }
+.ctx .mi .sw { width: 32px; height: 18px; border-radius: 99px; background: var(--chip-hover);
+  border: 1px solid var(--stroke); position: relative; flex: none; transition: background var(--t-fast); }
+.ctx .mi .sw::after { content: ""; position: absolute; top: 50%; left: 2px; width: 11px; height: 11px;
+  border-radius: 50%; background: #fff; transform: translateY(-50%); transition: left var(--t-fast) var(--ease); }
+.ctx .mi .sw.on { background: var(--accent); border-color: transparent; }
+.ctx .mi .sw.on::after { left: 17px; }
+.ctx .sep { height: 1px; margin: 6px 10px; background: var(--stroke-soft); }
+.ctx .head {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px 8px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; color: var(--text-dim);
+}
+.ctx .head .fname { letter-spacing: 0; text-transform: none; font-weight: 600; font-size: 11.5px;
+  color: var(--text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx .sub-title { padding: 10px 10px 6px; font-size: 10.5px; font-weight: 700; letter-spacing: .9px;
+  text-transform: uppercase; color: var(--text-dim); }
+.ctx .mi input[type="text"] { flex: 1; background: var(--chip); border: 1px solid var(--stroke);
+  border-radius: 8px; padding: 6px 9px; color: var(--text); font: inherit; font-size: 12px; outline: none; }
+
+/* submenu (flyout) */
+.ctx.sub { width: 250px; }
+.ctx.sub.left { transform-origin: top right; }
+
+/* ============================== DOCK EXTRAS ============================== */
+.dock .dbtn .badge {
+  position: absolute; top: -1px; right: -1px; min-width: 15px; height: 15px; padding: 0 3px;
+  border-radius: 8px; background: var(--accent); color: #fff; font-size: 9.5px; font-weight: 700;
+  display: grid; place-items: center; box-shadow: 0 2px 6px rgba(0,0,0,.4);
+}
+.dbtn { position: relative; }
+.seekbar .buffered { background: var(--chip); }
+.seekbar .chip-ab {
+  position: absolute; top: 0; bottom: 0; border-radius: 3px;
+  background: rgba(232,56,79,.34); border-left: 2px solid var(--accent); border-right: 2px solid var(--accent);
+}
+.seekbar .time-bubble {
+  position: absolute; bottom: 26px; transform: translateX(-50%);
+  padding: 5px 9px; border-radius: 8px; background: var(--panel-strong); border: 1px solid var(--stroke);
+  backdrop-filter: blur(var(--glass-blur)); font-size: 11px; font-weight: 600; color: var(--text);
+  font-variant-numeric: tabular-nums; opacity: 0; pointer-events: none; transition: opacity var(--t-fast);
+}
+.seekbar:hover .time-bubble, .seekbar.scrubbing .time-bubble { opacity: 1; }
+
+/* ============================== PANELS (functional) ============================== */
+/* A closed panel is invisible, sits on top of the video and used to keep a
+   26 px backdrop blur alive the whole session (two of them at once).
+   visibility:hidden takes it out of the render tree entirely, while the open
+   / close fade still animates. lumen.css gives panels pointer events; a closed
+   one must stay inert. */
+.chrome .panel { pointer-events: none; visibility: hidden;
+  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease), visibility var(--t-med); }
+.chrome .panel.open { visibility: visible; pointer-events: auto; z-index: 60; }
+.chrome .panel .dbtn, .chrome .panel button, .chrome .panel input,
+.chrome .panel select, .chrome .panel .switch, .chrome .panel .seg { pointer-events: auto; }
+.chrome .panel:not(.open) * { pointer-events: none !important; }
+.pitem .thumb { background-size: cover; background-position: center; }
+.pitem .thumb .badge-dur { position: absolute; right: 3px; bottom: 3px; padding: 1px 4px; border-radius: 4px;
+  background: rgba(0,0,0,.62); color: #fff; font-size: 9.5px; font-weight: 600; }
+.pitem .kill { opacity: 0; width: 26px; height: 26px; flex: none; }
+.pitem:hover .kill { opacity: 1; }
+.pitem.dragging { opacity: .5; }
+.pitem.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.pitem.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.pitem .fav.on { color: var(--accent); }
+.pempty { padding: 22px 12px; text-align: center; font-size: 12px; color: var(--text-dim); line-height: 1.7; }
+.pempty b { color: var(--text-sub); }
+.panel .list-head { display: flex; align-items: center; gap: 8px; padding: 4px 10px 8px; }
+
+/* settings extras */
+.row.col { flex-direction: column; align-items: stretch; gap: 8px; }
+.row .lbl .kbd-mini { font-size: 10.5px; }
+.row .btn {
+  border: 1px solid var(--stroke); background: var(--chip); color: var(--text);
+  font: inherit; font-size: 11.5px; font-weight: 600; padding: 6px 11px; border-radius: 9px; cursor: pointer;
+  transition: background var(--t-fast), transform var(--t-fast);
+}
+.row .btn:hover { background: var(--chip-hover); }
+.row .btn:active { transform: scale(.97); }
+.row .btn.accent { background: linear-gradient(115deg, var(--accent-deep), var(--accent)); border-color: transparent; color: #fff; }
+.row select {
+  background: var(--chip); border: 1px solid var(--stroke); color: var(--text); font: inherit;
+  font-size: 11.5px; border-radius: 9px; padding: 6px 8px; outline: none; max-width: 168px;
+}
+.row select option { background: #14161f; color: #fff; }
+.theme-light .row select option { background: #fff; color: #111; }
+
+/* 10-band equalizer */
+.eq-wrap { display: flex; gap: 6px; justify-content: space-between; padding: 10px 4px 2px; }
+.eq-band { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.eq-band .vslider {
+  position: relative; width: 100%; height: 104px; border-radius: 8px; background: var(--chip);
+  border: 1px solid var(--stroke-soft); cursor: ns-resize; overflow: hidden;
+}
+.eq-band .vslider .fill {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 50%;
+  background: linear-gradient(to top, var(--accent-deep), var(--accent)); opacity: .85;
+}
+.eq-band .vslider .mid { position: absolute; left: 3px; right: 3px; top: 50%; height: 1px; background: var(--stroke); }
+.eq-band .hz { font-size: 9.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.eq-band .db { font-size: 9.5px; font-weight: 600; color: var(--text-sub); font-variant-numeric: tabular-nums; }
+
+/* ============================== TOASTS / MODAL ============================== */
+.toasts {
+  /* above the floating subtitles in windowed/maximised play, so a toast never
+     lands on top of the cue you are reading */
+  position: absolute; left: 50%; bottom: 190px; transform: translateX(-50%);
+  z-index: 72; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  pointer-events: none; width: max-content; max-width: min(560px, 88%);
+}
+.mode-mini .toasts { bottom: 54px; }
+.toast {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 13px;
+  background: var(--panel-strong); border: 1px solid var(--stroke);
+  backdrop-filter: blur(24px) saturate(var(--glass-sat));
+  box-shadow: 0 16px 40px rgba(0,0,0,.45), inset 0 1px 0 var(--hl);
+  color: var(--text); font-size: 12.5px; font-weight: 500; pointer-events: auto;
+  opacity: 0; transform: translateY(8px); visibility: hidden;
+  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease), visibility var(--t-med);
+}
+.toast.in { opacity: 1; transform: none; visibility: visible; }
+.toast svg { width: 18px; height: 18px; flex: none; color: var(--text-sub); }
+.toast.ok svg { color: #58d68d; }
+.toast.err svg { color: var(--accent); }
+.toast .txt { white-space: pre-line; }
+.toast .txt b { color: var(--text); }
+.toast .txt small { display: block; margin-top: 2px; color: var(--text-dim); font-size: 11px; word-break: break-all; }
+.toast .act {
+  margin-left: 4px; padding: 5px 10px; border-radius: 9px; border: 1px solid var(--stroke);
+  background: var(--chip); color: var(--text); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  white-space: nowrap;
+}
+.toast .act:hover { background: var(--chip-hover); }
+
+.modal-bd {
+  position: absolute; inset: 0; z-index: 74; background: rgba(4,6,10,.5);
+  backdrop-filter: blur(4px); display: grid; place-items: center;
+  opacity: 0; pointer-events: none; visibility: hidden;
+  transition: opacity var(--t-med) var(--ease), visibility var(--t-med);
+}
+.modal-bd.open { opacity: 1; pointer-events: auto; visibility: visible; }
+.modal {
+  width: min(560px, 88%); max-height: 78%; overflow: auto; padding: 20px 22px;
+  border-radius: 18px; background: var(--panel-strong); border: 1px solid var(--stroke);
+  backdrop-filter: blur(30px) saturate(var(--glass-sat));
+  box-shadow: 0 30px 80px rgba(0,0,0,.6), inset 0 1px 0 var(--hl); color: var(--text);
+  transform: scale(.97); transition: transform var(--t-med) var(--ease);
+}
+.modal-bd.open .modal { transform: none; }
+.modal h2 { font-size: 15px; font-weight: 600; margin: 0 0 12px; display: flex; align-items: center; gap: 9px; }
+.modal h2 svg { width: 18px; height: 18px; color: var(--text-sub); }
+.modal table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.modal td { padding: 5px 0; vertical-align: top; }
+.modal td.k { color: var(--text-dim); width: 40%; }
+.modal td.v { color: var(--text); font-variant-numeric: tabular-nums; word-break: break-all; }
+.modal .mrow { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.modal .mrow .btn { border: 1px solid var(--stroke); background: var(--chip); color: var(--text);
+  font: inherit; font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 10px; cursor: pointer; }
+.modal .mrow .btn.accent { background: linear-gradient(115deg, var(--accent-deep), var(--accent)); border-color: transparent; color: #fff; }
+.modal .mrow .btn:hover { background: var(--chip-hover); }
+.modal p { font-size: 12.5px; color: var(--text-sub); line-height: 1.75; margin: 0 0 10px; }
+.modal .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
+
+/* ============================== MINI PLAYER ============================== */
+.mode-mini .zoom-badge,
+.mode-mini .drop-hint { display: none; }      /* the strip is too small for them */
+.mini-bar {
+  position: absolute; inset: 0; z-index: 50; display: none;
+  align-items: center; gap: 8px; padding: 8px 10px 8px 12px;
+  background: linear-gradient(to top, rgba(0,0,0,.7), rgba(0,0,0,.16));
+}
+.mode-mini .mini-bar { display: flex; }
+.mode-mini .chrome .dock, .mode-mini .center-play, .mode-mini .panel,
+.mode-mini .fs-tools, .mode-mini .seek-fx { display: none; }
+.mini-bar .mtime { font-size: 11px; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+.mini-bar .mbar { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,.24); overflow: hidden; }
+.mini-bar .mbar i { display: block; height: 100%; width: 0; background: var(--accent); }
+.mini-bar .mbar { cursor: pointer; }
+.mini-bar .dbtn { color: #fff; outline: none; }
+.mini-bar .dbtn:focus, .mini-bar .dbtn:active { background: transparent; }
+.mini-bar .mtitle { font-size: 12px; font-weight: 600; color: #fff; max-width: 40%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+
+/* ============================== TOUCH TWEAKS ============================== */
+body.touch .dbtn { width: 44px; height: 42px; }
+body.touch .dock-row { gap: 4px; }
+body.touch .dbtn.primary { width: 50px; height: 44px; }
+body.touch .seekbar { height: 30px; }
+body.touch .seekbar .track { height: 7px; }
+body.touch .vol .rail { width: 110px; }
+body.touch .panel { width: min(420px, 92%); }
+body.touch .panel-body::-webkit-scrollbar { width: 12px; }
+body.touch .titlebar { height: 52px; }
+body.touch .winbar { height: 44px; }
+body.touch .winbar .tb-btn { width: 52px; height: 40px; }
+body.touch .titlebar .tb-btn { width: 52px; height: 46px; }
+body.touch .zoom-badge { font-size: 13px; padding: 9px 13px; }
+body.touch .pitem { padding: 12px 10px; }
+body.touch .ctx .mi { padding: 13px 12px; }
+
+/* ============================== HIDDEN GLASS SURFACES ==============================
+   Every overlay that carries a backdrop-filter but is only sometimes visible
+   (volume OSD, seek chips, the big play button) gets visibility:hidden in its
+   hidden state. Chromium then skips its blur pass entirely — an invisible
+   opacity:0 layer with backdrop-filter still made the compositor blur the
+   video on every frame. */
+.osd { visibility: hidden; transition: opacity var(--t-med) var(--ease), visibility var(--t-med); }
+.osd.show { visibility: visible; }
+.seek-fx { visibility: hidden; }
+.seek-fx.run { visibility: visible; }
+.playing .center-play { visibility: hidden; }
+.playing.center-hover .center-play { visibility: visible; }
+
+/* ============================== LOW-RESOURCE MODE ==============================
+   Settings → Playback → "Low-resource mode" used to do almost nothing. It now
+   removes every live blur (the single most expensive thing a glass UI asks a
+   GPU to do) and falls back to the solid surface tokens. The layout, colours
+   and controls stay identical. */
+html.lores .dock, html.lores .panel, html.lores .ctx, html.lores .toast,
+html.lores .modal, html.lores .modal-bd, html.lores .chip, html.lores .center-play,
+html.lores .seek-chip, html.lores .osd, html.lores .zoom-badge, html.lores .scrub-preview,
+html.lores .drop-hint, html.lores .time-bubble, html.lores .demo-ribbon {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html.lores .dock, html.lores .seek-chip, html.lores .osd, html.lores .zoom-badge,
+html.lores .scrub-preview, html.lores .toast, html.lores .ctx, html.lores .panel {
+  background: var(--panel-strong);
+}
+html.lores .center-play { background: #1a1c24; }
+html.lores .zoomer { will-change: auto; }
+html.lores .pitem .eq i { animation: none; }
+html.lores .sub-line { text-shadow: 0 1px 2px rgba(0,0,0,.9); }
+
+/* ============================== MISC ============================== */
+.hidden { display: none !important; }
+.mode-window .titlebar { display: flex; }
+.mode-max .titlebar { display: flex; }
+.mode-window .winbar { display: flex; }
+.mode-max .winbar { display: flex; }
+body.idle .ctx.open { opacity: 1; }
+body.idle .toasts { opacity: 1; }
+.spacer { flex: 1; }
+.kbd.inline { padding: 2px 5px; font-size: 10px; }
+
+/* real sliders built from the design tokens (used in settings) */
+input[type="range"].lr {
+  -webkit-appearance: none; appearance: none; height: 18px; background: transparent; width: 100%;
+}
+input[type="range"].lr::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--chip-hover); }
+input[type="range"].lr::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -4px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); cursor: pointer;
+}
+input[type="range"].lr::-moz-range-track { height: 4px; border-radius: 2px; background: var(--chip-hover); }
+input[type="range"].lr::-moz-range-thumb { width: 12px; height: 12px; border: none; border-radius: 50%; background: #fff; }
+
+/* demo-mode ribbon (only shows when the Python bridge is absent) */
+.demo-ribbon {
+  position: absolute; left: 50%; top: 60px; transform: translateX(-50%);
+  z-index: 68; display: none; align-items: center; gap: 9px; padding: 8px 14px;
+  border-radius: 12px; background: var(--panel-strong); border: 1px solid var(--stroke);
+  backdrop-filter: blur(20px); color: var(--text-sub); font-size: 11.5px; font-weight: 500;
+  box-shadow: 0 12px 30px rgba(0,0,0,.4); pointer-events: none;
+}
+/* the ribbon itself is inert (it floats over the video) but its buttons work */
+.demo-ribbon .btn { pointer-events: auto; border: 1px solid var(--stroke); background: var(--chip);
+  color: var(--text); font: inherit; font-size: 11px; font-weight: 600; padding: 4px 9px;
+  border-radius: 8px; cursor: pointer; }
+.demo-ribbon .btn:hover { background: var(--chip-hover); }
+.demo-ribbon .btn.on { background: linear-gradient(115deg, var(--accent-deep), var(--accent)); color: #fff; }
+body.demo .demo-ribbon { display: flex; }
+body.demo.media-loaded .demo-ribbon { display: none; }   /* real media is open */
+.mode-mini .demo-ribbon { display: none; }               /* mini player stays clean */
+body.demo.panels-open .demo-ribbon { display: none; }    /* a panel needs the space */
+.demo-ribbon b { color: var(--text); }
+.demo-ribbon .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .toast, .ctx, .zoom-badge, .scrub-preview { transition-duration: 1ms !important; }
+}

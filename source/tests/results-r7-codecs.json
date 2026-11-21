@@ -1,0 +1,61 @@
+{
+  "results": [
+    {
+      "name": "HEVC/x265 is selected for H.264 conversion",
+      "ok": true,
+      "details": {
+        "source": "hevc",
+        "profile": "Main",
+        "plan": {
+          "hasVideo": true,
+          "videoCopy": false,
+          "needEncode": true,
+          "codec": "hevc",
+          "highBitDepth": false,
+          "audioCopy": true,
+          "vcodec": "hevc",
+          "acodec": "aac",
+          "hdr": false,
+          "audioIndex": 1,
+          "audioOrder": 0,
+          "audioSel": "0:1?"
+        },
+        "output": {
+          "video": "h264",
+          "audio": "aac",
+          "size": 117768
+        }
+      }
+    },
+    {
+      "name": "10-bit HEVC + AC-3 is converted to browser-compatible H.264/AAC",
+      "ok": true,
+      "details": {
+        "sourceVideo": "hevc",
+        "profile": "Main 10",
+        "pixfmt": "yuv420p10le",
+        "sourceAudio": "ac3",
+        "plan": {
+          "hasVideo": true,
+          "videoCopy": false,
+          "needEncode": true,
+          "codec": "hevc",
+          "highBitDepth": true,
+          "audioCopy": false,
+          "vcodec": "hevc",
+          "acodec": "ac3",
+          "hdr": false,
+          "audioIndex": 1,
+          "audioOrder": 0,
+          "audioSel": "0:1?"
+        },
+        "output": {
+          "video": "h264",
+          "audio": "aac",
+          "size": 138954
+        }
+      }
+    }
+  ],
+  "allok": true
+}

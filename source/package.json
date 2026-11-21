@@ -1,0 +1,23 @@
+{
+  "name": "lumen",
+  "productName": "Lumen",
+  "version": "1.0.0",
+  "description": "Lumen — Liquid Glass Player. Desktop host (Electron) for the HTML/CSS/JS player core.",
+  "main": "main.js",
+  "author": "Behnam Ehsani",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "start:dev": "electron . --dev",
+    "prepare:ffmpeg": "node tools/prepare-ffmpeg.js",
+    "dist:win": "node tools/build-windows.js",
+    "dist:win:setup": "node tools/build-installer.js",
+    "dist:linux": "node tools/build-linux.js"
+  },
+  "devDependencies": {
+    "@electron/asar": "^3.2.10",
+    "electron": "^44.5.1",
+    "resedit": "^2.0.3"
+  }
+}
