@@ -59,7 +59,7 @@ Lumen probes a file with ffprobe and routes incompatible video/audio through FFm
 
 ## Build from source
 
-Requirements: Node.js 22.12 or newer, `unzip` or `7z`, and the official Electron 44.5.1 Windows x64 runtime ZIP. The ZIP is not the npm Electron package; put it at `.electron/electron-v44.5.1-win32-x64.zip` or pass `--zip <path>`. The supplied `build-windows-r9.bat` can download and verify both pinned runtime archives.
+Requirements: Node.js 22.12 or newer and the official Electron 44.5.1 Windows x64 runtime ZIP. No `unzip` or 7-Zip is needed on Windows: `tools/zipfs.js` unpacks both pinned archives with `unzip` → 7-Zip → its own built-in inflater → PowerShell, so a bare Windows install works. The ZIP is not the npm Electron package; put it at `.electron/electron-v44.5.1-win32-x64.zip` or pass `--zip <path>`. The supplied `build-windows-r9.bat` can download and verify both pinned runtime archives.
 
 NSIS 3.x (`makensis`) is **optional** and only needed for the `Lumen-Setup` installer. When it is missing, the build still succeeds with the portable app and a shareable `Lumen-portable-1.0.0-r9.zip`. `build-installer.js` searches PATH, `NSIS_DIR`, the usual install folders (including Chocolatey, Scoop and the `winget` link folder) and the NSIS registry key, so `winget install --id NSIS.NSIS -e` (or `choco install nsis -y`) is enough for it to be picked up on the next run. It also accepts `--makensis "C:\path\makensis.exe"` for unusual installations.
 
@@ -115,7 +115,8 @@ Application code is MIT-licensed; that does not replace the separate terms that 
 
 ```bash
 node tests/test-sidecar-matcher.js        # 8 checks, no dependencies
-node tests/test-source-ui.js              # 14 static checks
+node tests/test-zip.js                    # 8 checks, the build's unzip fallback
+node tests/test-source-ui.js              # 15 static checks
 npm install --no-save jsdom               # optional, only for the next one
 node tests/test-keyboard-renderer.js      # 8 headless UI checks
 node tests/test-ui-smoke.js               # 12 interaction checks

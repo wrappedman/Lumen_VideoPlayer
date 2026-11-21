@@ -15,9 +15,15 @@
       "total": 8
     },
     {
+      "suite": "ZIP fallback used by the Windows build (stored, deflate, real Info-ZIP archive, zip-slip, ZIP64)",
+      "passed": 8,
+      "total": 8,
+      "note": "Runs with no external unzip/7z and no dependencies."
+    },
+    {
       "suite": "Settings, bridge parity, shortcuts, delete safety, volume and performance static checks",
-      "passed": 14,
-      "total": 14,
+      "passed": 15,
+      "total": 15,
       "covers": [
         "preload.js METHOD list matches main.js handlers and every renderer call",
         "PageDown/PageUp wrap through the playlist and Delete trashes + continues",
@@ -26,7 +32,8 @@
         "hydrate no longer registers/probes every file",
         "closed panels and hidden overlays are visibility:hidden; no idle animations",
         "mute keeps the remembered level; [ and ] change the speed",
-        "build works without NSIS; logo/icon assets are consistent"
+        "build works without NSIS; logo/icon assets are consistent",
+        "the build unpacks archives with no unzip/7-Zip on the machine"
       ]
     },
     {
@@ -66,7 +73,8 @@
       "real low-resource mode, bounded metadata caches, debounced config writes, ETag/304 statics",
       "mute no longer zeroes the remembered volume; [ and ] speed keys work again",
       "the BAT no longer aborts when NSIS is missing (portable app + ZIP instead)",
-      "new vector logo and 7-frame icon.ico"
+      "new vector logo and 7-frame icon.ico",
+      "the build unpacks the pinned archives with a built-in reader (no unzip/7-Zip needed)"
     ]
   }
 }

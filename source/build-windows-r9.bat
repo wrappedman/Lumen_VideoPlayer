@@ -225,7 +225,8 @@ if "%BUILD_RC%"=="0" set "BUILD_RC=1"
 echo.
 echo BUILD FAILED. The command that failed is shown immediately above.
 echo Check Node.js 22.12+, network access and free disk space.
-echo (NSIS is optional and is not the reason for a failure at this stage.)
+echo NSIS is optional, and unzip / 7-Zip are NOT required: the archives are
+echo unpacked by a built-in reader, so the error above is the real cause.
 echo If this is not enough, save the complete console text or a screenshot.
 popd
 pause

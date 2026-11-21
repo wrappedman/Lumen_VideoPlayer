@@ -14,6 +14,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
+const zipfs = require('./zipfs.js');
 const asar = require('@electron/asar');
 
 /* Pinned Gyan.dev 64-bit static essentials package (FFmpeg 9.0.2, GPLv3).
@@ -39,13 +40,14 @@ function copyDir(src, dest) {
   }
 }
 
+/* Windows has no `unzip` binary, and 7-Zip is not guaranteed either — this
+   used to abort the build after the runtime archive had already been
+   downloaded and checksum-verified. zipfs tries unzip → 7z → PowerShell →
+   a built-in inflater, so unpacking can no longer fail for lack of a tool. */
 function unzip(zip, dest) {
-  fs.mkdirSync(dest, { recursive: true });
-  let r = spawnSync('unzip', ['-q', '-o', zip, '-d', dest], { stdio: 'inherit' });
-  if (r.status === 0) return true;
-  log('unzip failed, trying 7z …');
-  r = spawnSync('7z', ['x', '-y', '-o' + dest, zip], { stdio: 'inherit' });
-  if (r.status !== 0) throw new Error('could not unpack ' + zip);
+  if (!zipfs.extractAll(zip, dest)) {
+    throw new Error('could not unpack ' + zip + '\n  tried: ' + zipfs.lastReasons().join(' · '));
+  }
   return true;
 }
 
@@ -57,22 +59,27 @@ function sha256File(file) {
 }
 
 function extractZipEntry(zip, entry, target) {
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  let fd = fs.openSync(target, 'w');
-  let r;
-  try {
-    r = spawnSync('unzip', ['-p', zip, entry], { stdio: ['ignore', fd, 'pipe'] });
-    if (r.status !== 0) {
-      try { fs.closeSync(fd); } catch (e) { }
-      try { fs.unlinkSync(target); } catch (e) { }
-      fd = fs.openSync(target, 'w');
-      r = spawnSync('7z', ['e', '-so', zip, entry], { stdio: ['ignore', fd, 'pipe'] });
-    }
-  } finally { try { fs.closeSync(fd); } catch (e) { } }
-  if (!r || r.status !== 0 || !fs.existsSync(target) || fs.statSync(target).size === 0) {
-    try { fs.unlinkSync(target); } catch (e) { }
-    throw new Error('cannot extract ' + entry + ' from the pinned FFmpeg archive');
+  if (!zipfs.extractEntry(zip, entry, target)) {
+    throw new Error('cannot extract ' + entry + ' from the pinned FFmpeg archive\n  tried: ' +
+      zipfs.lastReasons().join(' · '));
   }
+}
+
+/* the pinned archive is the only source of truth, but a renamed licence or
+   readme inside a future build must not fail the whole packaging run with a
+   bare "cannot extract" line */
+function extractAnyEntry(zip, names, target, what) {
+  for (const name of names) {
+    try {
+      if (zipfs.extractEntry(zip, name, target)) return name;
+    } catch (e) { /* try the next spelling */ }
+  }
+  let listing = [];
+  try {
+    listing = zipfs.readEntries(zip).entries.map(function (e) { return e.name; }).slice(0, 25);
+  } catch (e) { listing = ['(archive could not be read: ' + (e && e.message) + ')']; }
+  throw new Error('cannot find ' + what + ' in the pinned FFmpeg archive.\n  looked for: ' + names.join(', ') +
+    '\n  the archive contains: ' + listing.join(', '));
 }
 
 function installBundledFfmpeg(zip, resourcesDir, srcDir) {
@@ -97,8 +104,10 @@ function installBundledFfmpeg(zip, resourcesDir, srcDir) {
     }
     log('bundled ' + name + ' (' + fs.statSync(dest).size + ' bytes)');
   });
-  extractZipEntry(zip, FFMPEG_ZIP_PREFIX + 'LICENSE', path.join(target, 'LICENSE.GPL-3.0.txt'));
-  extractZipEntry(zip, FFMPEG_ZIP_PREFIX + 'README.txt', path.join(target, 'README-upstream.txt'));
+  extractAnyEntry(zip, [FFMPEG_ZIP_PREFIX + 'LICENSE', FFMPEG_ZIP_PREFIX + 'LICENSE.txt',
+    FFMPEG_ZIP_PREFIX + 'COPYING.GPLv3'], path.join(target, 'LICENSE.GPL-3.0.txt'), 'the GPLv3 licence');
+  extractAnyEntry(zip, [FFMPEG_ZIP_PREFIX + 'README.txt', FFMPEG_ZIP_PREFIX + 'README.md'],
+    path.join(target, 'README-upstream.txt'), 'the upstream README');
   const notice = path.join(srcDir, 'vendor', 'ffmpeg', 'win-x64', 'NOTICE-FA.txt');
   if (fs.existsSync(notice)) fs.copyFileSync(notice, path.join(target, 'NOTICE-FA.txt'));
   fs.writeFileSync(path.join(target, 'BUILD-INFO.txt'),

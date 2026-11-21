@@ -16,6 +16,7 @@ const mainJs = read('main.js');
 const store = read('host/store.js');
 const installer = read('tools/build-installer.js');
 const pack = read('tools/pack.js');
+const zipfs = read('tools/zipfs.js');
 const bat = read('build-windows-r9.bat');
 const results = [];
 function check(name, fn) {
@@ -204,6 +205,23 @@ check('the build no longer depends on NSIS and the new icon is wired end to end'
   assert.deepEqual(fs.readFileSync(path.join(root, 'assets', 'icon.png')), png);
   /* and the .exe icon still comes from assets/icon.ico */
   assert.match(pack, /'assets', 'icon\.ico'/);
+});
+
+
+check('the build unpacks archives without needing unzip or 7-Zip', function () {
+  /* one shared unpacker for the runtime archive and the FFmpeg entries */
+  assert.match(pack, /const zipfs = require\('\.\/zipfs\.js'\);/);
+  assert.match(pack, /zipfs\.extractAll\(/);
+  assert.match(pack, /zipfs\.extractEntry\(/);
+  assert.doesNotMatch(pack, /spawnSync\('unzip'/, 'pack.js must not call unzip directly');
+  /* the fallback chain lives in zipfs.js, ending in a pure-Node reader */
+  assert.match(zipfs, /inflateRawSync/);
+  assert.match(zipfs, /0x06054b50/);
+  assert.match(zipfs, /EncodedCommand/);
+  assert.match(zipfs, /ZIP64 archives are not supported/);
+  assert.match(zipfs, /refusing to write outside the output folder/);
+  /* and the failure text points at the real cause instead of blaming tools */
+  assert.match(bat, /unzip \/ 7-Zip are NOT required/);
 });
 
 
