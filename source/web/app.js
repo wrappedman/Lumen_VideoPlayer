@@ -71,7 +71,7 @@
   function fileUrl(p) { return 'file:///' + String(p).replace(/\\/g, '/').replace(/ /g, '%20').replace(/#/g, '%23'); }
   function isVideoExt(e) { return ['mp4','m4v','mkv','webm','avi','mov','mpg','mpeg','ts','m2ts','wmv','flv','ogv','3gp','mpd','m3u8'].indexOf(e) >= 0; }
   function isAudioExt(e) { return ['mp3','m4a','aac','flac','wav','ogg','oga','opus','wma','mka'].indexOf(e) >= 0; }
-  function isSubExt(e) { return ['srt','vtt','ass','ssa','sub','txt'].indexOf(e) >= 0; }
+  function isSubExt(e) { return ['srt','vtt','ass','ssa','sub','txt','ttml','dfxp'].indexOf(e) >= 0; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
   function uid() { return Math.random().toString(36).slice(2, 10); }
   function icon(name, size) {
@@ -147,6 +147,18 @@
       if (opts && opts.mode) u += '&mode=' + opts.mode;
       return u;
     },
+    /* The <video> tag carries no crossorigin attribute (it must be present
+       before the element starts loading). WebAudio graphs therefore mute the
+       sound of *online* streams — the media element treats them as tainted
+       cross-origin content. Serving the bytes through the same-origin /media
+       proxy keeps the WebAudio path audible; plain playback still uses the
+       original URL so live streams keep their headers. */
+    playbackUrl: function (item, at) {
+      if (!item) return null;
+      if (item.path) return Bridge.mediaUrl(item, at);
+      if (/^https?:/i.test(item.url || '') && Audio.wanted() && item.token) return Bridge.mediaUrl(item, at);
+      return item.url || null;
+    },
     /* Ask the host where the ffmpeg stream will really start (a stream copy
        snaps back to the previous keyframe) and get the url for it. */
     startTranscode: function (item, at, audioIdx, opts) {
@@ -171,8 +183,9 @@
     },
     subUrl: function (item, id, delayMs, atSec, fmt) {
       if (!Bridge.ready || !item || !item.token) return null;
+      /* the delay is applied by the renderer at paint time — the host only
+         needs the position hint (atSec) and the ASS safety flag */
       return '/subtitle?t=' + encodeURIComponent(item.token) + '&id=' + encodeURIComponent(id) +
-        (delayMs ? '&delay=' + Math.round(delayMs) : '') +
         (atSec > 60 ? '&at=' + Math.round(atSec) : '') +
         (fmt === 'ass' || fmt === 'ssa' ? '&fmt=' + fmt : '');
     },
@@ -201,7 +214,12 @@
                 step();
               });
             };
-            fr.onerror = function () { resolve(null); };
+            fr.onerror = function () {
+              /* the read died mid-upload: tell the host to drop the partial
+                 file instead of leaking the stream and temp file forever */
+              Bridge.call('drop_abort', upId);
+              resolve(null);
+            };
             fr.readAsDataURL(blob);
           }
           Bridge.call('drop_begin', upId, file.size).then(step);
@@ -232,6 +250,7 @@
     touch: true, swipe: true, pinch: true, longpress: true, dblw: 0.31, touchui: false,
     aspect: 'auto', rotate: 0, wheel: 'volume', smooth: true, hdr: true,
     normalize: false, eq: false, eqPreset: 'flat', eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    boost: false, subLang: 'fa',
     subPreset: 'default', subSize: 34, subPos: 14, subDelay: 0, subOn: true, subautoload: true,
     subFont: 'default', subColor: '#ffffff', subBg: 'none', subShadow: 'soft',
     subOutline: 'off', subBold: false,
@@ -354,6 +373,7 @@
     pendingSeek: null,
     time: 0, dur: 0, playing: false,
     info: null,
+    chapters: null,                         /* [{title, start, end}] seekbar marks */
     audioTracks: [], subTracks: [],
     subCues: [], subActive: null,
     brightness: 1,
@@ -493,13 +513,12 @@
       });
     },
 
-    _load: function (item, opts) {
-      opts = opts || {};
-      this.pendingItem = null;
-      if (!item) return;
+    /* A new file must start clean: playback state from the *previous* item
+       (an ffmpeg stream still winding down, its position offset, its saved
+       resume point) must never leak into the next load. */
+    _resetLoadState: function (item) {
       this.stopTranscode();
       this.setSubtitle(null, true);
-      var v = this.el;
       this.item = item;
       this.transcode = false;
       this.transcodeAudio = null;
@@ -507,23 +526,37 @@
       this.codec = ''; this.codecUnsafe = false; this.audioCodecUnsafe = false;
       this.probeRemoteInfo = null; this.recoverStage = 0;
       this.subTracks = []; this.audioTracks = []; this.subCues = []; this.subActive = null;
+      this.chapters = null;
       this._subAutoItem = null; this._subStreamOpen = false; this._subFrom = 0;
-      /* a new file starts at the beginning — never inherit the previous
-         file's clock (that leaked into the ffmpeg fallback position) */
       this.time = 0;
       this.playing = false;
-      this.dur = item.dur || 0;
+      this.dur = item ? (item.dur || 0) : 0;
       this._subSig = '';
-      var self = this;
-
-      /* keep the list position in sync for *every* kind of item — a stream
-         that lives in the playlist used to reset the index to -1, so next /
-         previous jumped to the top of the list instead of the neighbour. */
-      var pi = Playlist.items.indexOf(item);
+      this._lastTranscodeSeek = 0;
+      var pi = item ? Playlist.items.indexOf(item) : -1;
       Playlist.index = pi >= 0 ? pi : -1;
+    },
+
+    /* the current position persisted for the next launch: local files and
+       online streams both get a resume entry (the host prunes the list) */
+    _saveResume: function (t) {
+      var item = this.item;
+      if (!item || !S.resume) return;
+      var key = item.path || (/^https?:/i.test(item.url || '') ? item.url : '');
+      if (key) resumeSet(key, t != null ? t : this.time);
+    },
+
+    _load: function (item, opts) {
+      opts = opts || {};
+      this.pendingItem = null;
+      if (!item) return;
+      this._resetLoadState(item);
+      if (Audio.wanted() && !item.demo && !item.path && /^https?:/i.test(item.url || '')) item._proxied = true;
+      var v = this.el;
 
       var at = opts.at;
       if (at == null && S.resume && item.path) at = resumeGet(item.path);
+      if (at == null && S.resume && !item.path && /^https?:/i.test(item.url || '')) at = resumeGet(item.url);
       if (at == null) at = 0;
       this.pendingSeek = at > 1 ? at : null;
 
@@ -547,7 +580,7 @@
       Events.emit('playlist');
       Events.emit('busy', true);
 
-      var url = item.path ? Bridge.mediaUrl(item, 0) : item.url;
+      var url = Bridge.playbackUrl(item, 0);
       if (!url) {
         /* no host (pure web preview) — play straight from the file system when
            the browser allows it (drag&drop / file picker gives us a blob URL) */
@@ -598,6 +631,8 @@
         Bridge.call('probe', item.path).then(function (info) {
           if (!info || self.item !== item) return;
           self.info = info;
+          /* chapters for the seekbar markers (never mapped into transcodes) */
+          self.chapters = (info.chapters && info.chapters.length) ? info.chapters.slice(0) : null;
           /* Probe before Chromium has time to settle on an unsupported track.
              High-bit-depth / non-native video is encoded to H.264 immediately;
              audio-only incompatibilities are remuxed with AAC. */
@@ -650,6 +685,10 @@
         if (info.duration && !self.dur) { self.dur = info.duration; item.dur = info.duration; }
         if (info.width) { item.w = info.width; item.h = info.height; }
         self.probeRemoteInfo = info;
+        /* chapters: the player does not map them into the transcode stream
+           (-map_chapters -1), so they only exist on the plain file path */
+        self.chapters = (info && info.chapters && info.chapters.length) ? info.chapters.slice(0) : null;
+        Events.emit('media', item);
         var flags = codecFlags(info);
         self.codec = flags.videoCodec;
         self.codecUnsafe = flags.videoUnsafe;
@@ -695,8 +734,14 @@
     play: function () {
       if (!this.item) return;
       if (this.item.demo) { this.playing = true; this.startDemoClock(); Events.emit('playstate'); return; }
+      var self = this;
       var p = this.el.play();
-      if (p && p.catch) p.catch(function () { Toast.show('Press play to start (browser autoplay policy)', { icon: 'info' }); });
+      if (p && p.catch) p.catch(function (e) {
+        /* a pending load was interrupted by a newer one (rapid file switch,
+           quick seek during a re-encode) — that is not an autoplay block */
+        if (e && e.name === 'AbortError') return;
+        Toast.show('Press play to start (browser autoplay policy)', { icon: 'info' });
+      });
       Audio.ensure();
       return p;
     },
@@ -737,13 +782,27 @@
       if (!this.item) return;
       if (this.item.demo) return;
       if (this.transcode) {
-        /* the bridge stream is a growing fragment — restart it at the new time */
-        this.startTranscode(t);
+        /* the bridge stream is a growing fragment — restart it at the new
+           time. Dragging the seekbar fires this continuously, and each call
+           spawns a fresh ffmpeg process: debounce so only the final position
+           (plus a spaced update while dragging) really restarts the stream. */
+        var self = this, now = Date.now();
+        clearTimeout(this._seekT);
+        if (!this._lastTranscodeSeek || now - this._lastTranscodeSeek > 650) {
+          this._lastTranscodeSeek = now;
+          this.startTranscode(t);
+        } else {
+          this._seekT = setTimeout(function () {
+            self._lastTranscodeSeek = Date.now();
+            self.startTranscode(self.time);
+          }, 320);
+        }
         if (opts.reason === 'step') Events.emit('seekstep', t - (opts.from != null ? opts.from : this.time));
         return;
       }
       try { this.el.currentTime = t; } catch (e) { }
       if (S.resume && this.item.path) resumeSet(this.item.path, t);
+      if (S.resume && !this.item.path && /^https?:/i.test(this.item.url || '')) resumeSet(this.item.url, t);
     },
     nudge: function (d) {
       var from = this.time;
@@ -752,6 +811,7 @@
 
     onEnded: function () {
       if (this.item && this.item.path) resumeClear(this.item.path);
+      if (this.item && !this.item.path && /^https?:/i.test(this.item.url || '')) resumeClear(this.item.url);
       if (S.repeat === 'one' && !this.transcode) { this.seek(0); this.play(); return; }
       var nx = Playlist.next(1);
       if (nx && (S.autonext || S.repeat === 'all') && (Playlist.items.length > 1)) {
@@ -781,7 +841,7 @@
       var want = stage || 1;
       if (want === 1 && this.codecUnsafe) want = 2;
       if (want > 2) {
-        Toast.show('This media cannot be played — its codec (' + (this.codec || '?') +
+        Toast.show('This media cannot be played — its codec (' + esc(this.codec || '?') +
           ') could not be decoded by the built-in FFmpeg engine.', { kind: 'err', icon: 'info', ms: 7000 });
         Events.emit('busy', false);
         return;
@@ -793,6 +853,13 @@
       var item = this.item;
       if (!item || !Bridge.ready) return;
       var self = this;
+      this._lastTranscodeSeek = Date.now();
+      /* seeking inside a transcode moves the saved resume point too — the
+         old code only stored seeks on the direct file path */
+      if (S.resume) {
+        var rkey = item.path || (/^https?:/i.test(item.url || '') ? item.url : '');
+        if (rkey && at > 1) resumeSet(rkey, at);
+      }
       var idx = (audioIdx != null) ? audioIdx : this.transcodeAudio;
       Bridge.startTranscode(item, at || 0, idx, opts).then(function (res) {
         if (self.item !== item) return;               /* user moved on */
@@ -806,7 +873,7 @@
         self.tOffset = Math.max(0, res.start != null ? res.start : (at || 0));
         if (audioIdx != null) self.transcodeAudio = audioIdx;
         self.pendingSeek = null;
-        if (self.transcodeReencoded) {
+          if (self.transcodeReencoded) {
           Toast.show('Converting this media to H.264 — the picture appears once the conversion starts (a few seconds).',
             { icon: 'film', ms: 4600 });
         }
@@ -847,7 +914,7 @@
       this.stopTranscode();
       var item = this.item;
       if (!item) { Events.emit('tracks'); return; }
-      var url = Bridge.mediaUrl(item, at) || (item.url || null);
+      var url = Bridge.playbackUrl(item, at);
       if (!url) { Events.emit('tracks'); return; }
       this.el.src = url;
       this.pendingSeek = at > 0.3 ? at : null;
@@ -862,8 +929,12 @@
       if (!Bridge.ffmpeg) { Toast.show('The built-in media engine is unavailable; reinstall Lumen to switch embedded tracks.', { kind: 'err', icon: 'audio-track' }); return; }
       this.transcodeAudio = idx;
       this.recoverStage = 0;                    /* a manual pick restarts the ladder */
-      this.startTranscode(this.time || 0, idx);
-      Toast.show('Audio track: ' + (a.label || ('#' + (idx + 1))), { icon: 'audio-track', ms: 2200 });
+      /* an online stream cannot seek its audio either: it also goes through
+         the transcode bridge (remux only — the stream is not re-encoded) */
+      var isOnline = !this.item.path && /^https?:/i.test(this.item.url || '');
+      var opts = isOnline ? { mode: 'remux' } : null;
+      this.startTranscode(this.time || 0, idx, opts);
+          Toast.show('Audio track: ' + esc(a.label || ('#' + (idx + 1))), { icon: 'audio-track', ms: 2200 });
       Events.emit('tracks');
     },
 
@@ -988,7 +1059,10 @@
     } catch (e) { }
   });
 
-  /* -------- resume positions (per file, mirrored to the host) ------- */
+  /* -------- resume positions (per file, mirrored to the host) -------
+     The host store (config.json) is the source of truth — its entries survive
+     restarts and are injected into RCACHE at boot. localStorage is kept as a
+     legacy mirror for pure-web demo mode (no host). */
   var RKEY = 'lumen.resume.v1';
   var RCACHE = (function () { try { return JSON.parse(localStorage.getItem(RKEY) || '{}'); } catch (e) { return {}; } })();
   function resumeGet(p) { var r = RCACHE[String(p).toLowerCase()]; return (r && r.t > 10) ? r.t : null; }
@@ -1001,6 +1075,23 @@
     Bridge.call('resume_set', p, t);
   }
   function resumeClear(p) { delete RCACHE[String(p).toLowerCase()]; try { localStorage.setItem(RKEY, JSON.stringify(RCACHE)); } catch (e) { } Bridge.call('resume_set', p, 0); }
+  /* the host is the source of truth for resume positions — pre-fill the cache
+     from the boot state so a file re-opened after a restart continues where it
+     stopped (localStorage dies with the random port origin) */
+  function resumeSeed(map) {
+    Object.keys(map || {}).forEach(function (k) {
+      var r = map[k];
+      if (r && r.t > 0) RCACHE[String(k).toLowerCase()] = { t: r.t, at: r.at || Date.now() };
+    });
+  }
+
+  /* periodic resume checkpoint while watching: a crash, a power cut or a
+     plain Alt+F4 in the middle of a long file used to lose the position
+     because only seek() wrote it */
+  setInterval(function () {
+    if (!Player.playing || !Player.item || Player.item.demo) return;
+    if (Player.time > 10) Player._saveResume();
+  }, 5000);
 
   /* ------------------------------------------------------------------ subtitles
      A tiny WEBVTT engine so the style presets (size, weight, box, position) can
@@ -1160,7 +1251,7 @@
       if (!e || !e.skip) {
         if (self.subActive === track) {
           Events.emit('busy', false);
-          Toast.show('Subtitle load failed: ' + (e && e.message), { kind: 'err', icon: 'subs-off' });
+          Toast.show('Subtitle load failed: ' + esc((e && e.message) || ''), { kind: 'err', icon: 'subs-off' });
         }
       }
     });
@@ -1180,7 +1271,7 @@
       this.subCues = arr;
       if (!this._subToastDone && silent !== true) {
         this._subToastDone = true;
-        Toast.show('Subtitles: ' + (track.label || 'track'), { icon: 'subtitles', ms: 1800 });
+        Toast.show('Subtitles: ' + esc(track.label || 'track'), { icon: 'subtitles', ms: 1800 });
       }
       this.renderSubs(this.time);
       this.subFrame();
@@ -1234,7 +1325,7 @@
         if (tok === self._subFetch && self.subActive === track) {
           self._subStreamOpen = false;
           Events.emit('busy', false);
-          Toast.show('Subtitle load failed: ' + (e && e.message), { kind: 'err', icon: 'subs-off' });
+          Toast.show('Subtitle load failed: ' + esc((e && e.message) || ''), { kind: 'err', icon: 'subs-off' });
         }
       });
     }
@@ -1278,7 +1369,16 @@
     this._subAutoItem = item;
     var pick = null, i;
     var ext = this.subTracks.filter(function (tr) { return tr && tr.kind === 'external'; });
+    /* a remembered pick always wins; then the subtitle whose language matches
+       the preferred one (fa/per/fas/farsi/… by default); then the first one */
     for (i = 0; i < ext.length && !pick; i++) if (ext[i].remembered) pick = ext[i];
+    var langOf = function (tr) {
+      var s = String((tr && (tr.lang || '')) + ' ' + ((tr && tr.label) || '')).toLowerCase();
+      return /(?:^|[^a-z])(fa|fas|per|farsi|persian|فارسی)(?:[^a-z]|$)/.test(s);
+    };
+    if (!pick && S.subLang !== 'off') {
+      for (i = 0; i < ext.length && !pick; i++) if (langOf(ext[i])) pick = ext[i];
+    }
     if (!pick && ext.length) pick = ext[0];
     if (!pick) {
       for (i = 0; i < this.subTracks.length && !pick; i++) {
@@ -1366,7 +1466,7 @@
         return false;
       }
     },
-    wanted: function () { return !!(S.eq || S.normalize); },
+    wanted: function () { return !!(S.eq || S.normalize || S.boost); },
     teardown: function () {
       if (!this.ctx) return;
       try {
@@ -1390,10 +1490,11 @@
       var self = this;
       this.bands.forEach(function (b, i) { b.gain.value = S.eqBands[i] || 0; });
     },
-    /* master level of the graph (interface volume / mute) */
+    /* master level of the graph (interface volume / mute / boost) */
     setVolume: function (v, muted) {
       if (!this.ctx || !this.gain) return;
       var target = muted ? 0 : clamp(v == null ? 1 : v, 0, 1);
+      if (S.boost) target *= 2;                       /* up to 200% */
       try {
         if (this.gain.gain.setTargetAtTime) this.gain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.012);
         else this.gain.gain.value = target;
@@ -1406,7 +1507,37 @@
       this.ensure(); this.applyEq();
       Events.emit('eq');
     },
-    attach: function () { if (this.wanted()) { this.ensure(); this.route(); } }
+    attach: function () { if (this.wanted()) { this.ensure(); this.route(); } },
+    /* react to the Settings switches while a file is playing: build the graph
+       when EQ/normalize is turned on, dismantle it when both are off, and
+       re-route the gain through (or around) the compressor. Switching to an
+       online stream source is also handled here. */
+    sync: function () {
+      if (this.wanted()) {
+        this.ensure();
+        this.route();
+        this.applyEq();
+      } else if (this.on) {
+        this.teardown();
+      }
+      /* with the graph dismantled the element owns its volume again */
+      Player.applyVolume();
+      /* an online item played directly sounds muted once a WebAudio graph
+         attaches to it (the <video> tag has no crossorigin attribute), so it
+         is rebased onto the same-origin proxy; the reverse happens on off */
+      var item = Player.item;
+      if (!item || item.demo || item.path || !/^https?:/i.test(item.url || '') || Player.transcode) return;
+      var wantProxy = this.wanted();
+      if (!!item._proxied === !!wantProxy) return;
+      var t = Player.time || 0;
+      item._proxied = wantProxy;
+      var url = wantProxy ? Bridge.playbackUrl(item, t) : item.url;
+      if (!url) return;
+      Player.el.src = url;
+      Player.pendingSeek = t > 0.3 ? t : null;
+      Player.el.load();
+      if (Player.playing) Player.play();
+    }
   };
 
   /* ------------------------------------------------------------------ toasts */
@@ -1474,8 +1605,9 @@
       var name = (S.muted || p === 0) ? 'volume-mute' : (p < 0.5 ? 'volume-low' : 'volume-high');
       var span = $('span[data-icon]', osd);
       if (span) { span.setAttribute('data-icon', name); injectIcons(osd); }
-      $('.osd .meter i', osd).style.width = (p * 100) + '%';
-      var b = $('.osd b', osd); if (b) b.textContent = Math.round(p * 100) + '%';
+      var pct = clamp(S.boost ? (p * 2) : p, 0, 2);          /* boost: 100–200% */
+      $('.osd .meter i', osd).style.width = (pct * 50) + '%';
+      var b = $('.osd b', osd); if (b) b.textContent = Math.round(pct * 100) + '%';
       osd.classList.add('show');
       clearTimeout(Osd._t);
       Osd._t = setTimeout(function () { osd.classList.remove('show'); }, 1100);
@@ -1490,7 +1622,7 @@
     S: S, setSetting: setSetting, saveSettings: saveSettings, saveSettingsNow: flushSettings, DEFAULTS: DEFAULTS,
     Events: Events, Bridge: Bridge, Playlist: Playlist, Player: Player, Subs: Subs, Audio: Audio,
     subStyle: SUB_STYLE,
-    Toast: Toast, Modal: Modal, Osd: Osd, resumeGet: resumeGet, resumeSet: resumeSet, resumeClear: resumeClear,
+    Toast: Toast, Modal: Modal, Osd: Osd, resumeGet: resumeGet, resumeSet: resumeSet, resumeClear: resumeClear, resumeSeed: resumeSeed,
     notify: function (t, o) { return Toast.show(t, o); },
     setVolume: function (v, silent) {
       S.volume = clamp(v, 0, 1);
@@ -1498,6 +1630,16 @@
       Player.applyVolume();
       saveSettings();
       if (!silent) Osd.show();
+      Events.emit('volume');
+    },
+    /* boost amplifies on top of the interface volume (100→200%) — the WebAudio
+       gain node is the only place a level above the file's own volume is
+       possible, so turning it on may switch the playback chain */
+    setBoost: function (on) {
+      S.boost = !!on;
+      saveSettings();
+      Audio.sync();
+      Osd.show();
       Events.emit('volume');
     },
     toggleMute: function () {

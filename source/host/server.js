@@ -366,10 +366,33 @@ function createServer(opts) {
     const lib = target.protocol === 'https:' ? https : http;
     const headers = {};
     if (req.headers.range) headers.Range = req.headers.range;
+    /* hop-by-hop headers (RFC 7230 §6.1) belong to *our* connection and must
+       never be forwarded — some CDNs reset the request when they see an
+       incoming keep-alive/upgrade combo that does not apply upstream */
+    const HOP = ['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+      'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length'];
+    const forward = function (src, dst) {
+      Object.keys(src || {}).forEach(function (k) {
+        const low = k.toLowerCase();
+        if (HOP.indexOf(low) < 0) dst[low] = src[k];
+      });
+    };
     const up = lib.get(target, { headers: headers }, function (upRes) {
-      const h = Object.assign({}, upRes.headers);
-      delete h['content-encoding'];
-      res.writeHead(upRes.statusCode || 502, h);
+      const h = {};
+      forward(upRes.headers, h);
+      /* upstream redirects (302 → CDN …) are resolved *here*, not forwarded:
+         a Location header pointing outside the app would be refused by the
+         page's navigation guard, and the player needs the stream itself */
+      const code = upRes.statusCode || 0;
+      if (code >= 300 && code < 400 && upRes.headers.location) {
+        upRes.resume();
+        let next;
+        try { next = new URL(upRes.headers.location, target).toString(); }
+        catch (e) { send(res, 502, 'Upstream redirect is broken'); return; }
+        proxyUrl(req, res, next);
+        return;
+      }
+      res.writeHead(code || 502, h);
       upRes.pipe(res);
     });
     up.on('error', function (e) { send(res, 502, 'Upstream error: ' + e.message); });
@@ -554,22 +577,44 @@ function createServer(opts) {
       return;
     }
     /* a sidecar file next to the local file: plain text work, no ffmpeg and
-       no waiting — .srt/.vtt/.txt/.ass/.ssa are all converted in-process */
+       no waiting — .srt/.vtt/.txt/.ass/.ssa are all converted in-process.
+       Formats ffmpeg understands but the in-process converter does not
+       (.ttml/.dfxp, MicroDVD .sub) go through ffmpeg once and are cached. */
     if (id.indexOf('ext:') === 0) {
       const p = id.slice(4);
       if (!util.isFile(p) || !util.isSubExt(util.extName(p))) {
         send(res, 404, 'Subtitle track could not be read');
         return;
       }
-      try {
-        const raw = fs.readFileSync(p, 'utf8');
-        const vtt = toVtt(raw, util.baseName(p));
-        if (!/-->/.test(vtt)) {
-          send(res, 415, 'this sidecar format cannot be converted — use .srt, .ass or .vtt');
-          return;
-        }
-        serveVtt(res, vtt);
-      } catch (e) { send(res, 500, 'Subtitle error: ' + (e && e.message)); }
+      const ext = util.extName(p);
+      const nativeFormats = { srt: 1, vtt: 1, txt: 1, ass: 1, ssa: 1 };
+      if (nativeFormats[ext]) {
+        try {
+          const raw = fs.readFileSync(p, 'utf8');
+          const vtt = toVtt(raw, util.baseName(p));
+          if (!/-->/.test(vtt)) {
+            send(res, 415, 'this sidecar format cannot be converted — use .srt, .ass or .vtt');
+            return;
+          }
+          serveVtt(res, vtt);
+        } catch (e) { send(res, 500, 'Subtitle error: ' + (e && e.message)); }
+        return;
+      }
+      if (!ff || !ff.available()) {
+        send(res, 415, 'this sidecar format (' + ext + ') needs ffmpeg for conversion — use .srt, .ass or .vtt');
+        return;
+      }
+      const cached = subCacheFile('ext:' + p, '.vtt');
+      if (util.isFile(cached) && serveVttFile(res, cached)) return;
+      ff.run(['-hide_banner', '-nostdin', '-loglevel', 'error', '-i', p,
+        '-f', 'webvtt', 'pipe:1'], { timeout: 60000 }).then(function (r) {
+          if (r.code !== 0 || !r.stdout || !/-->/.test(r.stdout)) {
+            send(res, 415, 'this sidecar format cannot be converted — use .srt, .ass or .vtt');
+            return;
+          }
+          try { fs.writeFileSync(cached, r.stdout, 'utf8'); } catch (e) { }
+          serveVtt(res, r.stdout);
+        }).catch(function (e) { send(res, 500, 'Subtitle error: ' + (e && e.message)); });
       return;
     }
     /* embedded in a local file: ffmpeg demuxes straight into the response */

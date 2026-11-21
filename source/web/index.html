@@ -161,6 +161,7 @@
                 <button data-v="15">15s</button><button data-v="30">30s</button>
               </div></div>
             <div class="row"><span class="lbl">Volume</span><input type="range" class="lr" id="setVol" min="0" max="1" step="0.01" value="0.65"><span class="val" id="setVolVal">65%</span></div>
+            <div class="row"><span class="lbl">Volume boost<div class="sub">Allow the volume to reach 200% (WebAudio gain)</div></span><div class="switch" data-set="boost"></div></div>
           </div>
 
           <!-- ---------------- bundled codecs ---------------- -->
@@ -285,6 +286,10 @@
               <button class="btn" id="subDelayReset">Reset</button></div>
             <div class="row"><span class="lbl">Active subtitle</span><select id="subTracks"><option>Off</option></select></div>
             <div class="row"><span class="lbl">Auto-load subtitles<div class="sub">Remembered file → best sidecar → first embedded track</div></span><div class="switch on" data-set="subautoload"></div></div>
+            <div class="row"><span class="lbl">Preferred subtitle language<div class="sub">Auto-pick chooses a track in this language first</div></span>
+              <div class="seg" data-set="sublang">
+                <button data-v="fa" class="on">فارسی</button><button data-v="en">English</button><button data-v="off">Off</button>
+              </div></div>
             <div class="row"><span class="lbl">Load subtitle file…</span><button class="btn accent" id="subLoadBtn">Browse</button></div>
             <div class="row"><span class="lbl">Subtitle appearance</span>
               <button class="btn" id="subResetBtn">Reset look</button></div>
@@ -338,10 +343,11 @@
           <div class="track">
             <div class="buffered" id="sbBuffered"></div>
             <div class="chip-ab hidden" id="sbAB"></div>
+            <div class="marks" id="sbMarks"></div>
             <div class="played" id="sbPlayed"></div>
-            <i class="tick" id="sbTick" style="left:35%"></i>
             <div class="thumb" id="sbThumb"></div>
           </div>
+          <div class="sb-thumb" id="sbThumbImg"><img alt=""><div class="sb-thumb-time">00:00</div><div class="sb-thumb-ch"></div></div>
           <div class="tip" id="sbTip">00:00</div>
         </div>
         <div class="dock-row">
@@ -376,7 +382,6 @@
     </div>
 
     <!-- ============================ OVERLAYS ============================ -->
-    <div class="ctx" id="ctxMenu" role="menu"></div>
     <div class="toasts" id="toasts"></div>
     <div class="modal-bd" id="modalBd"><div class="modal" id="modal"></div></div>
 

@@ -23,7 +23,7 @@ const METHODS = [
   'resume_set', 'remember_subs',
   /* files */
   'open_files', 'open_subtitles', 'register_path', 'register_url', 'drop_path',
-  'drop_begin', 'drop_chunk', 'drop_finish', 'reveal', 'media_delete',
+  'drop_begin', 'drop_chunk', 'drop_finish', 'drop_abort', 'reveal', 'media_delete',
   /* media */
   'probe', 'sidecar_subtitles', 'transcode_start',
   /* ffmpeg: bundled engine status + optional advanced external override */
