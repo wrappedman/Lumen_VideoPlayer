@@ -938,7 +938,7 @@ const handlers = {
       const key = pathKey(sp);
       if (known.has(key)) return;
       known.add(key);
-      list.push({ path: sp, label: util.baseName(sp) });
+      list.push({ path: sp, label: util.baseName(sp), remembered: true });
     });
     return list;
   }

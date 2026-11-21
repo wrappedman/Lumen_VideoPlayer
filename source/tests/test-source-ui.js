@@ -225,4 +225,63 @@ check('the build unpacks archives without needing unzip or 7-Zip', function () {
 });
 
 
+check('subtitles stream cue-by-cue instead of blocking on the whole file', function () {
+  const server = read('host/server.js');
+  const ffmpeg = read('host/ffmpeg.js');
+  /* the host pipes ffmpeg straight into the HTTP response */
+  assert.match(server, /pipeFfmpegSub/);
+  assert.match(server, /'-f', 'webvtt', 'pipe:1'/);
+  /* ASS text is dropped by the webvtt encoder in several ffmpeg builds —
+     those tracks are copied out and converted line by line instead */
+  assert.match(server, /'-c:s', 'copy', '-f', 'ass', 'pipe:1'/);
+  assert.match(server, /assLineToVtt/);
+  /* ffmpeg writes CRLF in ASS — the converter must strip the line ending */
+  assert.match(server, /\[\\r\\n\]\+/);
+  /* the resume hint keeps absolute cue timestamps */
+  assert.match(server, /'-copyts'/);
+  assert.match(server, /'&at='|at > 60/);
+  /* the renderer paints cues as they arrive and per animation frame */
+  assert.match(app, /getReader/);
+  assert.match(app, /Player\.subFrame/);
+  assert.match(app, /requestAnimationFrame/);
+  assert.match(app, /Player\.subSeekCheck/);
+  /* the delay is a repaint now, not a refetch of the track */
+  const delay = app.match(/Player\.reloadSubtitleDelay = function \([\s\S]*?\n  };/);
+  assert.ok(delay, 'reloadSubtitleDelay present');
+  assert.match(delay[0], /renderSubs/);
+  assert.doesNotMatch(delay[0], /setSubtitle\(/);
+  /* probe exposes the sub codec so ASS tracks take the safe path */
+  assert.match(ffmpeg, /kind: 'embedded',\s*\n\s*lang: lang,\s*\n\s*codec: String\(s\.codec_name/);
+});
+
+check('a matching subtitle is picked automatically and can be switched off', function () {
+  assert.match(app, /subautoload: true/);
+  assert.match(app, /Player\.autoPickSub/);
+  assert.match(app, /remembered: !!sp\.remembered/);
+  assert.match(mainJs, /remembered: true/);
+  assert.match(html, /data-set="subautoload"/);
+  /* remembered choice wins over the best sidecar scan */
+  const pick = app.match(/Player\.autoPickSub = function \(item\) \{[\s\S]*?\n  };/);
+  assert.ok(pick && /remembered/.test(pick[0]) && /kind === 'external'/.test(pick[0]));
+});
+
+check('tooltips are one unclippable system instead of cut ::after slivers', function () {
+  assert.match(lumenCss, /\.app-tip/);
+  assert.doesNotMatch(lumenCss, /\.dbtn\[data-tip\]:hover::after/);
+  /* ui.js paints it, fixed-position, with a flip when pinned to the top */
+  assert.match(ui, /app-tip/);
+  assert.match(ui, /pointerover/);
+  assert.match(ui, /position:fixed|classList\.add\('show'\)/);
+  assert.match(ui, /r\.top - th - 10 >= 8/);
+  /* the native title= tips (delayed, alien-looking) are gone from the UI */
+  assert.equal((html.match(/ title="/g) || []).length, 0);
+  assert.match(html, /data-tip="Close \(Esc\)"/);
+  assert.match(html, /data-tip="Reset settings"/);
+  assert.match(html, /data-tip="Soft yellow"/);
+  /* the dead stage-wide tooltip never becomes live */
+  assert.doesNotMatch(html, /data-tip="Double-click sides/);
+  /* seekbar keeps its own hover-time preview instead of a native title */
+  assert.doesNotMatch(html, /id="seekbar" title=/);
+});
+
 console.log('\n' + results.length + '/' + results.length + ' UI/source/BAT static checks passed.');

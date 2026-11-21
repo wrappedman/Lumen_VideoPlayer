@@ -224,11 +224,15 @@ body.theme-black { --text:#F3F5F9; --text-sub:#A9B1BF; --text-dim:#6E7684;
 .dbtn.on { color: var(--accent); }
 .dbtn.on::after { content:""; position:absolute; bottom:2px; left:50%; transform:translateX(-50%);
   width:4px; height:4px; border-radius:50%; background: var(--accent); }
-.dbtn[data-tip]:hover::after {
-  content: attr(data-tip); position:absolute; bottom: calc(100% + 9px); left:50%; transform:translateX(-50%);
-  padding:5px 9px; border-radius:8px; background: var(--panel-strong); border:1px solid var(--stroke);
-  color:var(--text); font-size:11px; font-weight:600; white-space:nowrap; pointer-events:none;
-  box-shadow: 0 6px 18px rgba(0,0,0,.3); z-index:5; }
+/* one shared tooltip (ui.js paints it) — position:fixed so the settings and
+   playlist panels can never clip it, and it flips below when pinned to the
+   top of the window */
+.app-tip { position:fixed; z-index:120; padding:5px 9px; border-radius:8px;
+  background: var(--panel-strong); border:1px solid var(--stroke); color:var(--text);
+  font-size:11px; font-weight:600; line-height:1.35; white-space:nowrap; pointer-events:none;
+  box-shadow: 0 6px 18px rgba(0,0,0,.3); opacity:0; transform:translateY(3px);
+  transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
+.app-tip.show { opacity:1; transform:none; }
 .time { font-size:12.5px; font-weight:600; color:var(--text); font-variant-numeric: tabular-nums;
   letter-spacing:.2px; margin: 0 10px 0 8px; white-space:nowrap; }
 .time .dur { color: var(--text-dim); font-weight:500; }
@@ -356,7 +360,6 @@ body.fs .titlebar, body.fs .winbar { display:none; }
 body.mode-full .fs-tools { display:flex; }
 .fs-tools .dbtn { width:34px; height:32px; }
 .fs-tools .dbtn svg { width:18px; height:18px; }
-.fs-tools .dbtn[data-tip]:hover::after { bottom:auto; top: calc(100% + 9px); }
 
 /* ------------------------------------------------------------ mockup harness (not part of app UI) */
 .harness { position:fixed; left:16px; bottom:14px; z-index:90; display:flex; align-items:center; gap:5px;

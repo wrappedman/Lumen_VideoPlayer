@@ -320,7 +320,8 @@ function createFfmpeg(opts) {
         order: si,
         label: bits.join(' · '),
         kind: 'embedded',
-        lang: lang
+        lang: lang,
+        codec: String(s.codec_name || '').toLowerCase()
       });
       si++;
     });
@@ -383,7 +384,7 @@ function createFfmpeg(opts) {
         if (sm) {
           info.subs.push({ id: 's:' + (-1), index: -1, order: info.subs.length,
             label: [(sm[1] || '').toUpperCase(), (sm[2] || '').toUpperCase()].filter(Boolean).join(' · '),
-            kind: 'embedded', lang: sm[1] || '' });
+            kind: 'embedded', lang: sm[1] || '', codec: String(sm[2] || '').toLowerCase() });
         }
       });
       info.format = (txt.match(/Input #0,\s*([^,]+)/) || [])[1] || '';

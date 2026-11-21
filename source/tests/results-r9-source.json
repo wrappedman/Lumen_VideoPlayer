@@ -22,8 +22,8 @@
     },
     {
       "suite": "Settings, bridge parity, shortcuts, delete safety, volume and performance static checks",
-      "passed": 15,
-      "total": 15,
+      "passed": 18,
+      "total": 18,
       "covers": [
         "preload.js METHOD list matches main.js handlers and every renderer call",
         "PageDown/PageUp wrap through the playlist and Delete trashes + continues",
@@ -33,7 +33,10 @@
         "closed panels and hidden overlays are visibility:hidden; no idle animations",
         "mute keeps the remembered level; [ and ] change the speed",
         "build works without NSIS; logo/icon assets are consistent",
-        "the build unpacks archives with no unzip/7-Zip on the machine"
+        "the build unpacks archives with no unzip/7-Zip on the machine",
+        "embedded subtitles stream cue by cue (pipeFfmpegSub, -copyts resume hint, ASS copy+convert)",
+        "auto-load of the best subtitle track with a settings switch",
+        "one shared unclippable tooltip system, native title= tips removed"
       ]
     },
     {
@@ -44,9 +47,9 @@
     },
     {
       "suite": "interaction smoke test (jsdom: transport, panels, settings, volume, search, modal, menu, modes)",
-      "passed": 12,
-      "total": 12,
-      "note": "Fails on any uncaught renderer error; requires the optional jsdom dependency."
+      "passed": 18,
+      "total": 18,
+      "note": "Fails on any uncaught renderer error; also drives the shared tooltip, subtitle auto-load, progressive stream parsing (with the UTF-8 fallback decoder) and the ASS/resume URL flags. Requires the optional jsdom dev dependency."
     },
     {
       "suite": "Node syntax checks",
@@ -74,7 +77,13 @@
       "mute no longer zeroes the remembered volume; [ and ] speed keys work again",
       "the BAT no longer aborts when NSIS is missing (portable app + ZIP instead)",
       "new vector logo and 7-frame icon.ico",
-      "the build unpacks the pinned archives with a built-in reader (no unzip/7-Zip needed)"
+      "the build unpacks the pinned archives with a built-in reader (no unzip/7-Zip needed)",
+      "subtitles: embedded tracks stream cue-by-cue (ffmpeg pipes into the HTTP response) and render per animation frame",
+      "subtitles: embedded ASS/SSA fixed (the ffmpeg webvtt encoder drops the text); sidecar .ass/.ssa convert in-process",
+      "subtitles: a matching track auto-loads on open (remembered > best sidecar > first embedded); switchable in Settings",
+      "subtitles: the delay buttons repaint instantly instead of re-fetching the track",
+      "subtitles: selecting an embedded track actually fetched it now (the old guard skipped tracks without a .path)",
+      "tooltips: one shared fixed-position tooltip that panels cannot clip; native title= tips removed"
     ]
   }
 }

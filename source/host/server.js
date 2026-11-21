@@ -8,6 +8,13 @@
      GET /transcode?t=&t0=&a=  live remux / transcode through ffmpeg
      GET /thumb?t=&at=         one frame, cheap enough for the playlist
      GET /subtitle?t=&id=      WebVTT (sidecar file or embedded track)
+                                The response STREAMS while ffmpeg walks the
+                                container: cues reach the page as they are
+                                demuxed, not after the whole file is read.
+                                &at=SEC  start demuxing around a resume point
+                                &fmt=ass copy ASS events out and convert
+                                         here (the webvtt encoder drops the
+                                         cue text in several ffmpeg builds)
 
    Every media route needs the session token that the host handed out, so a
    random page in a browser cannot pull files from the machine.
@@ -128,6 +135,41 @@ function createServer(opts) {
     return true;
   }
 
+  function assTimeToVtt(v) {
+    const p = String(v).trim().split(':');
+    const sec = parseFloat(String(p[p.length - 1]).replace(',', '.')) || 0;
+    const min = p.length > 2 ? parseInt(p[p.length - 2], 10) || 0 : 0;
+    const hr = p.length > 3 ? parseInt(p[p.length - 3], 10) || 0 : 0;
+    const s2 = hr * 3600 + min * 60 + sec;
+    const hh = String(Math.floor(s2 / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((s2 % 3600) / 60)).padStart(2, '0');
+    const ss = String(Math.floor(s2 % 60)).padStart(2, '0');
+    const ms = String(Math.round((s2 % 1) * 1000)).padStart(3, '0');
+    return hh + ':' + mm + ':' + ss + '.' + ms;
+  }
+
+  /* one ASS Dialogue line → one VTT cue (or null). Shared by the sidecar
+     .ass/.ssa converter and by the streaming converter for embedded ASS:
+     re-encoding ASS with -c:s webvtt drops the cue text in several ffmpeg
+     builds, so the events are copied out untouched and converted here. */
+  function assLineToVtt(line) {
+    /* ffmpeg writes CRLF line endings in ASS — strip them or the $ anchor
+       never matches */
+    const m = /^Dialogue:\s*(.*)$/.exec(String(line || '').replace(/[\r\n]+$/, ''));
+    if (!m) return null;
+    /* Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text —
+       the text itself may contain commas, and hand-made files sometimes drop
+       the trailing optional fields, so the fields are counted, not assumed */
+    const parts = m[1].split(',');
+    if (parts.length < 5) return null;
+    const start = parts[1], end = parts[2];
+    if (!/:/.test(start) || !/:/.test(end)) return null;
+    const body = String(parts.length >= 10 ? parts.slice(9).join(',') : parts.slice(4).join(','))
+      .replace(/\{[^}]*\}/g, '').replace(/\\[Nn]/g, '\n').replace(/\\h/g, ' ').trim();
+    if (!body) return null;
+    return assTimeToVtt(start) + ' --> ' + assTimeToVtt(end) + '\n' + body + '\n\n';
+  }
+
   function toVtt(text, name) {
     let t = String(text).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
     if (/^WEBVTT/.test(t)) return t;
@@ -135,26 +177,10 @@ function createServer(opts) {
       /* ass/ssa → keep the dialogue lines, drop the style tags */
       const out = ['WEBVTT', ''];
       t.split('\n').forEach(function (line) {
-        const m = /^Dialogue:\s*([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),(.*)$/.exec(line);
-        if (!m) return;
-        const conv = function (v) {
-          const p = String(v).trim().split(':');
-          const sec = parseFloat(String(p[p.length - 1]).replace(',', '.')) || 0;
-          const min = p.length > 2 ? parseInt(p[p.length - 2], 10) || 0 : 0;
-          const hr = p.length > 3 ? parseInt(p[p.length - 3], 10) || 0 : 0;
-          const s2 = hr * 3600 + min * 60 + sec;
-          const hh = String(Math.floor(s2 / 3600)).padStart(2, '0');
-          const mm = String(Math.floor((s2 % 3600) / 60)).padStart(2, '0');
-          const ss = String(Math.floor(s2 % 60)).padStart(2, '0');
-          const ms = String(Math.round((s2 % 1) * 1000)).padStart(3, '0');
-          return hh + ':' + mm + ':' + ss + '.' + ms;
-        };
-        const body = String(m[10] || '').replace(/\{[^}]*\}/g, '').replace(/\\N|\\n/g, '\n').trim();
-        if (!body) return;
-        out.push(conv(m[1]) + ' --> ' + conv(m[2]));
-        out.push(body, '');
+        const cue = assLineToVtt(line);
+        if (cue) out.push(cue);
       });
-      return out.join('\n');
+      return out.join('');
     }
     t = t.replace(/(\d{1,3}:\d{2}:\d{2}),(\d{1,3})/g, '$1.$2');
     /* SRT blocks may use a "1" index line — WebVTT is happy with it as long as
@@ -210,37 +236,67 @@ function createServer(opts) {
     }).catch(function (e) { send(res, 502, 'could not fetch that subtitle: ' + (e && e.message)); });
   }
 
-  function remoteStreamSub(res, mediaUrl, idx) {
+  function remoteStreamSub(res, mediaUrl, idx, fmt, at) {
     if (!mediaUrl || !/^https?:/i.test(mediaUrl) || !isFinite(idx) || idx < 0) {
       send(res, 400, 'this stream has no readable subtitle track');
       return;
     }
-    const cached = subCacheFile('e:' + mediaUrl + '#' + idx, '.vtt');
+    const isAss = fmt === 'ass' || fmt === 'ssa';
+    const cached = subCacheFile('e:' + mediaUrl + '#' + idx + (isAss ? ':ass' : ''), '.vtt');
     if (util.isFile(cached) && serveVttFile(res, cached)) return;
-
-    let child;
     const args = ['-hide_banner', '-nostdin', '-loglevel', 'error',
-      '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5',
-      '-i', mediaUrl, '-map', '0:' + idx, '-c:s', 'webvtt', '-f', 'webvtt', 'pipe:1'];
+      '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
+    /* a resume/seek hint: start demuxing around the playback position, keep
+       the original timestamps so the cues stay in sync */
+    if (isFinite(at) && at > 60) args.push('-ss', String(Math.max(0, at - 30)), '-copyts');
+    args.push('-i', mediaUrl, '-map', '0:' + idx);
+    if (isAss) args.push('-c:s', 'copy', '-f', 'ass', 'pipe:1');
+    else args.push('-c:s', 'webvtt', '-f', 'webvtt', 'pipe:1');
+    log('[lumen] extracting subtitle track ' + idx + ' from ' + mediaUrl);
+    pipeFfmpegSub(res, args, { transform: isAss ? assLineToVtt : null, cacheFile: at > 60 ? null : cached });
+  }
+
+  /* ffmpeg → HTTP for subtitle extraction. The response starts with the very
+     first demuxed cue instead of waiting for the whole container, so embedded
+     tracks appear as fast as in native players. `transform` (ASS) converts
+     line by line; `cacheFile` records the converted VTT for next time. */
+  function pipeFfmpegSub(res, args, opts) {
+    opts = opts || {};
+    const transform = opts.transform || null;
+    let child;
     try { child = ff.spawnStream(args); }
     catch (e) { send(res, 500, 'ffmpeg could not start'); return; }
     children.add(child);
-    let started = false, closed = false, sink = null;
+    let started = false, closed = false, sink = null, line = '';
     const guard = setTimeout(function () {
       if (started || closed) return;
       try { child.kill('SIGKILL'); } catch (e) { }
       send(res, 504, 'this subtitle track did not start — the stream may use image-based subtitles');
     }, 40000);
-
-    child.stdout.once('data', function (first) {
+    const emit = function (chunk) {
+      try { res.write(chunk); } catch (e) { }
+      if (sink) { try { sink.write(chunk); } catch (e) { } }
+    };
+    child.stdout.on('data', function (d) {
       if (closed) return;
-      started = true;
-      clearTimeout(guard);
-      res.writeHead(200, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'no-store' });
-      try { res.write(first); } catch (e) { }
-      try { sink = fs.createWriteStream(cached); sink.write(first); } catch (e) { sink = null; }
-      child.stdout.on('data', function (d) { if (sink) { try { sink.write(d); } catch (e) { } } });
-      child.stdout.pipe(res);
+      if (!started) {
+        if (!d || !d.length) return;
+        started = true;
+        clearTimeout(guard);
+        res.writeHead(200, { 'Content-Type': 'text/vtt; charset=utf-8', 'Cache-Control': 'no-store' });
+        if (opts.cacheFile) { try { sink = fs.createWriteStream(opts.cacheFile); } catch (e) { sink = null; } }
+        if (transform) emit('WEBVTT\n\n');
+      }
+      if (!transform) { emit(d); return; }
+      line += d.toString('utf8');
+      const parts = line.split('\n');
+      line = parts.pop();
+      const out = [];
+      for (let i = 0; i < parts.length; i++) {
+        const cue = transform(parts[i]);
+        if (cue) out.push(cue);
+      }
+      if (out.length) emit(out.join(''));
     });
     child.stderr.on('data', function (d) { const t = String(d).trim(); if (t) log('[ffmpeg] ' + t); });
     child.on('error', function (e) {
@@ -251,7 +307,8 @@ function createServer(opts) {
       closed = true;
       clearTimeout(guard);
       children.delete(child);
-      if (sink && started) { try { sink.end(); } catch (e) { } }
+      if (transform && line) { const cue = transform(line); if (cue) emit(cue); line = ''; }
+      if (sink) { try { sink.end(); } catch (e) { } }
       try { res.end(); } catch (e) { }
       if (!started) send(res, 415, 'this stream has no text subtitle track (image-based subtitles cannot be converted)');
     });
@@ -485,30 +542,47 @@ function createServer(opts) {
 
   function subtitle(req, res, entry, q) {
     const id = String(q.get('id') || '');
+    const at = Math.max(0, parseFloat(q.get('at')) || 0);
+    const fmt = String(q.get('fmt') || '').toLowerCase();
+    const isAss = fmt === 'ass' || fmt === 'ssa';
     /* a subtitle that lives online next to the stream */
     if (id.indexOf('netfile:') === 0) { remoteSidecar(res, id.slice(8)); return; }
     /* a subtitle stream inside a remote container / playlist */
     if (id.indexOf('netstream:') === 0) {
       if (!ff || !ff.available()) { send(res, 503, 'ffmpeg is required for the tracks inside a stream'); return; }
-      remoteStreamSub(res, entry && entry.url ? entry.url : '', parseInt(id.slice(10), 10));
+      remoteStreamSub(res, entry && entry.url ? entry.url : '', parseInt(id.slice(10), 10), fmt, at);
       return;
     }
-    /* a sidecar file next to the local file: plain text work, no ffmpeg needed */
+    /* a sidecar file next to the local file: plain text work, no ffmpeg and
+       no waiting — .srt/.vtt/.txt/.ass/.ssa are all converted in-process */
     if (id.indexOf('ext:') === 0) {
-      if (!ff) { send(res, 503, 'the host is not ready'); return; }
-      ff.extractSubtitle(entry && entry.path, id).then(function (txt) {
-        if (txt == null) { send(res, 404, 'Subtitle track could not be read'); return; }
-        serveVtt(res, txt);
-      }).catch(function (e) { send(res, 500, 'Subtitle error: ' + (e && e.message)); });
+      const p = id.slice(4);
+      if (!util.isFile(p) || !util.isSubExt(util.extName(p))) {
+        send(res, 404, 'Subtitle track could not be read');
+        return;
+      }
+      try {
+        const raw = fs.readFileSync(p, 'utf8');
+        const vtt = toVtt(raw, util.baseName(p));
+        if (!/-->/.test(vtt)) {
+          send(res, 415, 'this sidecar format cannot be converted — use .srt, .ass or .vtt');
+          return;
+        }
+        serveVtt(res, vtt);
+      } catch (e) { send(res, 500, 'Subtitle error: ' + (e && e.message)); }
       return;
     }
-    /* embedded in a local file */
+    /* embedded in a local file: ffmpeg demuxes straight into the response */
     if (!ff || !ff.available()) { send(res, 503, 'ffmpeg is required for embedded subtitles'); return; }
     if (!entry || !entry.path) { send(res, 400, 'no local file for this track'); return; }
-    ff.extractSubtitle(entry.path, id).then(function (txt) {
-      if (txt == null) { send(res, 404, 'Subtitle track could not be read'); return; }
-      serveVtt(res, txt);
-    }).catch(function (e) { send(res, 500, 'Subtitle error: ' + (e && e.message)); });
+    const idx = parseInt(String(id).replace(/^s:/, ''), 10);
+    if (!isFinite(idx) || idx < 0) { send(res, 400, 'bad subtitle stream'); return; }
+    const args = [];
+    if (at > 60) args.push('-ss', String(Math.max(0, at - 30)), '-copyts');
+    args.push('-hide_banner', '-nostdin', '-loglevel', 'error', '-i', entry.path, '-map', '0:' + idx);
+    if (isAss) args.push('-c:s', 'copy', '-f', 'ass', 'pipe:1');
+    else args.push('-c:s', 'webvtt', '-f', 'webvtt', 'pipe:1');
+    pipeFfmpegSub(res, args, { transform: isAss ? assLineToVtt : null });
   }
 
   const server = http.createServer(function (req, res) {

@@ -169,10 +169,12 @@
       if (!Bridge.ready || !item || !item.token) return null;
       return '/thumb?t=' + encodeURIComponent(item.token) + '&at=' + (t || 0).toFixed(1);
     },
-    subUrl: function (item, id, delayMs) {
+    subUrl: function (item, id, delayMs, atSec, fmt) {
       if (!Bridge.ready || !item || !item.token) return null;
       return '/subtitle?t=' + encodeURIComponent(item.token) + '&id=' + encodeURIComponent(id) +
-        (delayMs ? '&delay=' + Math.round(delayMs) : '');
+        (delayMs ? '&delay=' + Math.round(delayMs) : '') +
+        (atSec > 60 ? '&at=' + Math.round(atSec) : '') +
+        (fmt === 'ass' || fmt === 'ssa' ? '&fmt=' + fmt : '');
     },
     /* drag&drop from Explorer: the host either hands us a real path
        (Electron / WebView2) or we ship the bytes over the bridge in chunks */
@@ -230,7 +232,7 @@
     touch: true, swipe: true, pinch: true, longpress: true, dblw: 0.31, touchui: false,
     aspect: 'auto', rotate: 0, wheel: 'volume', smooth: true, hdr: true,
     normalize: false, eq: false, eqPreset: 'flat', eqBands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    subPreset: 'default', subSize: 34, subPos: 14, subDelay: 0, subOn: true,
+    subPreset: 'default', subSize: 34, subPos: 14, subDelay: 0, subOn: true, subautoload: true,
     subFont: 'default', subColor: '#ffffff', subBg: 'none', subShadow: 'soft',
     subOutline: 'off', subBold: false,
     ontop: false, repeat: 'off', shuffle: false, abLoop: true
@@ -383,13 +385,18 @@
         Events.emit('time');
         self.loopGuard();
       });
+      v.addEventListener('seeked', function () {
+        var t = (self.transcode ? (self.tOffset || 0) : 0) + (v.currentTime || 0);
+        self.renderSubs(t);
+        self.subSeekCheck(t);
+      });
       v.addEventListener('durationchange', function () {
         if (!isFinite(v.duration)) return;
         self.dur = self.transcode ? ((self.tOffset || 0) + v.duration) : v.duration;
         Events.emit('time');
       });
       v.addEventListener('progress', function () { Events.emit('buffered'); });
-      v.addEventListener('play', function () { self.playing = true; Events.emit('playstate'); });
+      v.addEventListener('play', function () { self.playing = true; Events.emit('playstate'); self.subFrame(); });
       v.addEventListener('pause', function () { self.playing = false; Events.emit('playstate'); });
       v.addEventListener('waiting', function () { Events.emit('busy', true); });
       v.addEventListener('playing', function () { Events.emit('busy', false); });
@@ -500,6 +507,7 @@
       this.codec = ''; this.codecUnsafe = false; this.audioCodecUnsafe = false;
       this.probeRemoteInfo = null; this.recoverStage = 0;
       this.subTracks = []; this.audioTracks = []; this.subCues = []; this.subActive = null;
+      this._subAutoItem = null; this._subStreamOpen = false; this._subFrom = 0;
       /* a new file starts at the beginning — never inherit the previous
          file's clock (that leaked into the ffmpeg fallback position) */
       this.time = 0;
@@ -618,6 +626,7 @@
           if (info.width) { item.w = info.width; item.h = info.height; }
           if (info.title && !item.title) item.title = info.title;
           self.probeExtras(item);        /* merges with what we already found */
+          self.autoPickSub(item);
         });
       } else if (item.subs) {
         this.subTracks = item.subs.slice(0);
@@ -671,11 +680,15 @@
           var key = sidecarPathKey(sp.path);
           if (known.has(key)) return;
           known.add(key);
-          add.push({ id: 'ext:' + sp.path, label: (sp.label || baseName(sp.path)), kind: 'external', path: sp.path });
+          add.push({ id: 'ext:' + sp.path, label: (sp.label || baseName(sp.path)),
+            kind: 'external', path: sp.path, remembered: !!sp.remembered });
         });
         if (!add.length) return;
         self.subTracks = self.subTracks.concat(add);
         Events.emit('tracks');
+        /* sidecars are found before the media probe answers — show the best
+           one right away instead of waiting for the embedded track list */
+        self.autoPickSub(item);
       }).catch(function () { });
     },
 
@@ -1058,36 +1071,227 @@
     };
   }
 
-  Player.setSubtitle = function (track, silent) {
+  /* plain UTF-8 decode for webviews without TextDecoder — multi-byte
+     sequences and surrogate pairs included (Persian text stays intact) */
+  function utf8Decode(bytes) {
+    var out = '', i = 0, n = bytes.length;
+    while (i < n) {
+      var c = bytes[i++];
+      if (c < 0x80) out += String.fromCharCode(c);
+      else if (c < 0xE0) out += String.fromCharCode(((c & 0x1F) << 6) | (bytes[i++] & 0x3F));
+      else if (c < 0xF0) out += String.fromCharCode(((c & 0x0F) << 12) | ((bytes[i++] & 0x3F) << 6) | (bytes[i++] & 0x3F));
+      else {
+        var cp = ((c & 0x07) << 18) | ((bytes[i++] & 0x3F) << 12) | ((bytes[i++] & 0x3F) << 6) | (bytes[i++] & 0x3F);
+        cp -= 0x10000;
+        out += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF));
+      }
+    }
+    return out;
+  }
+  /* how many bytes at the end of the chunk form a complete UTF-8 sequence —
+     an incomplete tail is carried over to the next chunk so a Persian letter
+     split across two network chunks is never mangled */
+  function utf8SafeCut(u8) {
+    var n = u8.length;
+    if (!n) return 0;
+    for (var back = 1; back <= 4 && back <= n; back++) {
+      var b = u8[n - back];
+      if (b < 0x80) return n;
+      if (b >= 0xC0) {
+        var len = b >= 0xF0 ? 4 : (b >= 0xE0 ? 3 : 2);
+        return (back === len) ? n : n - back;
+      }
+    }
+    return Math.max(0, n - 4);
+  }
+  /* ASS/SSA tracks must be stream-copied: the ffmpeg WebVTT encoder drops the
+     cue text in several builds, so the host converts the events itself */
+  function subTrackFmt(track) {
+    var c = String((track && track.codec) || '').toLowerCase();
+    if (c === 'ass' || c === 'ssa') return c;
+    if (/\b(ass|ssa)\b/i.test(String((track && track.label) || ''))) return 'ass';
+    return '';
+  }
+
+  Player.setSubtitle = function (track, silent, atOverride) {
     var item = this.item, layer = $('#subsLayer');
     this.subActive = track;
     this.subCues = [];
+    this._subSig = '';
+    this._subFrom = 0;
+    this._subStreamOpen = false;
+    this._subToastDone = false;
+    /* every load gets a token — a stream that is still walking the file must
+       never overwrite a newer choice */
+    var tok = this._subFetch = (this._subFetch || 0) + 1;
+    if (this._subAbort) { try { this._subAbort.abort(); } catch (e) { } this._subAbort = null; }
     if (!layer) return;
     layer.innerHTML = '';
     if (!track) { Events.emit('tracks'); return; }
     var self = this;
     var url = null;
-    if ((track.path || track.net) && Bridge.ready && item && item.token) url = Bridge.subUrl(item, track.id, S.subDelay);
+    var at = Math.max(0, atOverride != null ? atOverride : (this.time || 0));
+    /* every track the host knows — sidecar (ext:), embedded (s:), remote
+       (netfile:/netstream:) — is fetched through the local server. Embedded
+       tracks carry no .path, so the old guard silently skipped them and the
+       track never loaded at all. */
+    var tid = String(track.id || '');
+    if (Bridge.ready && item && item.token && (track.path || track.net || tid)) {
+      url = Bridge.subUrl(item, track.id, S.subDelay, at, subTrackFmt(track));
+      if (at > 60) this._subFrom = Math.max(0, at - 30);
+    }
     if (!url && track.url) url = track.url;
     if (!url) { /* pure web: convert locally with the built-in parser via fetch of a file url */ url = track.path ? fileUrl(track.path) : null; }
     if (!url) { Events.emit('tracks'); return; }
     Events.emit('busy', true);
-    fetch(url).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-      .then(function (txt) {
-        if (self.subActive !== track) return;
-        self.subCues = Subs.parse(txt);
-        Events.emit('busy', false);
-        Events.emit('tracks');
-        if (silent !== true) Toast.show('Subtitles: ' + (track.label || 'track') + ' · ' + self.subCues.length + ' cues', { icon: 'subtitles', ms: 2000 });
-        self.renderSubs(self.time);
-      })
-      .catch(function (e) {
-        Events.emit('busy', false);
-        Toast.show('Subtitle load failed: ' + e.message, { kind: 'err', icon: 'subs-off' });
-      });
+    var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+    if (ctl) this._subAbort = ctl;
+    fetch(url, ctl ? { signal: ctl.signal } : undefined).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (self.subActive !== track || tok !== self._subFetch) {
+        try { if (r.body && r.body.cancel) r.body.cancel(); } catch (e) { }
+        throw { skip: true };
+      }
+      /* embedded tracks arrive as a live stream: the first demuxed cues are
+         painted long before ffmpeg has walked to the end of the file */
+      if (r.body && typeof r.body.getReader === 'function') return self._subStream(r.body.getReader(), track, tok, silent);
+      return r.text().then(function (txt) { self._subMerge(txt, track, tok, silent, true); });
+    }).catch(function (e) {
+      if (!e || !e.skip) {
+        if (self.subActive === track) {
+          Events.emit('busy', false);
+          Toast.show('Subtitle load failed: ' + (e && e.message), { kind: 'err', icon: 'subs-off' });
+        }
+      }
+    });
   };
+
+  /* merge one piece of VTT/SRT text into the cue list and repaint */
+  Player._subMerge = function (txt, track, tok, silent, final) {
+    if (tok !== this._subFetch || this.subActive !== track) return;
+    var cues = Subs.parse(txt);
+    if (cues.length) {
+      var arr = this.subCues;
+      for (var i = 0; i < cues.length; i++) {
+        /* cues arrive in order; a rare out-of-order batch triggers one sort */
+        if (!arr.length || cues[i].start >= arr[arr.length - 1].start) arr.push(cues[i]);
+        else { arr = arr.concat(cues.slice(i)); arr.sort(function (a, b) { return a.start - b.start; }); break; }
+      }
+      this.subCues = arr;
+      if (!this._subToastDone && silent !== true) {
+        this._subToastDone = true;
+        Toast.show('Subtitles: ' + (track.label || 'track'), { icon: 'subtitles', ms: 1800 });
+      }
+      this.renderSubs(this.time);
+      this.subFrame();
+    }
+    if (final) {
+      this._subStreamOpen = false;
+      Events.emit('busy', false);
+      Events.emit('tracks');
+    }
+  };
+
+  Player._subStream = function (reader, track, tok, silent) {
+    var self = this;
+    self._subStreamOpen = true;
+    var dec = null;
+    try { dec = new TextDecoder('utf-8'); } catch (e) { dec = null; }
+    var pend = '', carry = null;
+    function pull(res) {
+      if (tok !== self._subFetch || self.subActive !== track) { try { reader.cancel(); } catch (e) { } return; }
+      if (res.done) {
+        if (carry && carry.length) { try { pend += utf8Decode(carry); } catch (e) { } carry = null; }
+        self._subMerge(pend ? pend + '\n\n' : '', track, tok, silent, true);
+        return;
+      }
+      var txt = null;
+      try {
+        if (dec) txt = dec.decode(res.value, { stream: true });
+        else if (typeof res.value === 'string') txt = res.value;
+        else {
+          /* no TextDecoder: keep an incomplete trailing sequence for the
+             next chunk, then decode the safe part with the built-in decoder */
+          var u8 = res.value;
+          if (carry && carry.length) {
+            var joined = new Uint8Array(carry.length + u8.length);
+            joined.set(carry); joined.set(u8, carry.length);
+            u8 = joined; carry = null;
+          }
+          var cut = utf8SafeCut(u8);
+          if (cut < u8.length) carry = Array.prototype.slice.call(u8, cut);
+          txt = utf8Decode(cut ? u8.subarray(0, cut) : new Uint8Array(0));
+        }
+      } catch (e) { txt = null; }
+      if (txt) {
+        pend += txt;
+        /* feed only complete blocks to the parser; the partial tail waits */
+        var blocks = pend.split(/\n{2,}/);
+        pend = blocks.pop() || '';
+        if (blocks.length) self._subMerge(blocks.join('\n\n') + '\n\n', track, tok, silent, false);
+      }
+      return reader.read().then(pull).catch(function (e) {
+        if (tok === self._subFetch && self.subActive === track) {
+          self._subStreamOpen = false;
+          Events.emit('busy', false);
+          Toast.show('Subtitle load failed: ' + (e && e.message), { kind: 'err', icon: 'subs-off' });
+        }
+      });
+    }
+    return reader.read().then(pull);
+  };
+
+  /* per-frame subtitle paint. timeupdate only fires about four times a
+     second, which let cues pop in up to a quarter second late — with an
+     active track the cue search runs on every animation frame instead. */
+  Player.subFrame = function () {
+    if (this._subRaf || typeof requestAnimationFrame !== 'function') return;
+    var self = this;
+    this._subRaf = requestAnimationFrame(function step() {
+      self._subRaf = 0;
+      if (!self.playing || !self.subCues || !self.subCues.length || document.hidden) return;
+      var v = self.el;
+      var t = (self.transcode ? (self.tOffset || 0) : 0) + ((v && v.currentTime) || 0);
+      self.renderSubs(t);
+      self._subRaf = requestAnimationFrame(step);
+    });
+  };
+
+  /* cues are fetched around the position the track was selected at; a jump
+     outside that window re-requests the track from the new position so the
+     subs appear at once instead of waiting for the walk to catch up */
+  Player.subSeekCheck = function (t) {
+    var a = this.subActive;
+    if (!a || !this.item) return;
+    var cues = this.subCues || [];
+    var last = cues.length ? (cues[cues.length - 1].end || 0) : 0;
+    if (t < (this._subFrom || 0) - 5) { this.setSubtitle(a, true, 0); return; }
+    if (t > last + 90 && this._subStreamOpen) this.setSubtitle(a, true, t);
+  };
+
+  /* pick a subtitle automatically when a file opens — the remembered choice
+     first, then the best sidecar, then the first embedded track. Switch it
+     off in Settings → Subtitles if you prefer to choose manually. */
+  Player.autoPickSub = function (item) {
+    if (!S.subautoload || !item || this.item !== item) return;
+    if (this.subActive || this._subAutoItem === item) return;
+    this._subAutoItem = item;
+    var pick = null, i;
+    var ext = this.subTracks.filter(function (tr) { return tr && tr.kind === 'external'; });
+    for (i = 0; i < ext.length && !pick; i++) if (ext[i].remembered) pick = ext[i];
+    if (!pick && ext.length) pick = ext[0];
+    if (!pick) {
+      for (i = 0; i < this.subTracks.length && !pick; i++) {
+        if (this.subTracks[i] && this.subTracks[i].kind === 'embedded') pick = this.subTracks[i];
+      }
+    }
+    if (pick) this.setSubtitle(pick, true, this.pendingSeek || this.time || 0);
+  };
+
   Player.reloadSubtitleDelay = function () {
-    if (this.subActive && this.subActive.path) this.setSubtitle(this.subActive, true);
+    /* the delay is applied while the cues are painted — changing it is a
+       repaint, the track is not fetched again */
+    if (this.subActive) this.renderSubs(this.time);
   };
   Player.renderSubs = function (t) {
     var layer = $('#subsLayer');

@@ -9,6 +9,7 @@ This archive is **source only**. It contains no EXE, installer, or build output.
 R9 preserves the R8 subtitle and Settings fixes and addresses a Windows download failure:
 
 - On Windows, if curl fails because Schannel cannot reach the certificate-revocation server (`CRYPT_E_REVOCATION_OFFLINE`), the BAT retries with `--ssl-no-revoke` while retaining TLS certificate/hostname checks; the pinned SHA-256 is still mandatory before extraction. The fallback covers both FFmpeg and Electron downloads.
+- Subtitles behave like native players: embedded tracks stream cue-by-cue (nothing waits for a full-file demux), cues render on every animation frame, and the best matching track auto-loads on open (Settings → Subtitles → “Auto-load subtitles”). ASS/SSA text is preserved end to end.
 - More reliable local sidecar subtitle discovery: Unicode/Persian names, differently named subtitles in a one-media folder, cluttered folders, and conventional `Subs` subfolders are handled; explicitly mismatched episode numbers and ambiguous unrelated subtitles are rejected.
 - Subtitle style controls remain in Settings, but the sample **Preview** row is removed. **Reset look** and the actual subtitle styling remain.
 - External subtitle tracks found before the slower media probe are retained when embedded tracks arrive, avoiding an async overwrite.
@@ -116,7 +117,7 @@ Application code is MIT-licensed; that does not replace the separate terms that 
 ```bash
 node tests/test-sidecar-matcher.js        # 8 checks, no dependencies
 node tests/test-zip.js                    # 8 checks, the build's unzip fallback
-node tests/test-source-ui.js              # 15 static checks
+node tests/test-source-ui.js              # 18 static checks
 npm install --no-save jsdom               # optional, only for the next one
 node tests/test-keyboard-renderer.js      # 8 headless UI checks
 node tests/test-ui-smoke.js               # 12 interaction checks

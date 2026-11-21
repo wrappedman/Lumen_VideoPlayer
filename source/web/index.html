@@ -19,7 +19,7 @@
 
     <!-- ============================ VIDEO AREA ============================ -->
     <div class="video-stack" id="stack" tabindex="0"
-         data-tip="Double-click sides = ±10s · Double-click center = fullscreen · Right-click / long-press = menu">
+        >
       <div class="zoomer" id="zoomer">
         <!-- 1) real media goes here -->
         <!-- NOTE: never add disablepictureinpicture here — Chromium treats it as a
@@ -65,10 +65,10 @@
       <!-- ------- window buttons (top row, windowed / maximized) ------- -->
       <div class="winbar" id="winbar">
         <div class="tb-spacer"></div>
-        <button class="tb-btn" id="tbPin" title="Always on top"><span data-icon="pin" data-size="17"></span></button>
-        <button class="tb-btn" id="tbMin" title="Minimize"><span data-icon="minimize" data-size="17"></span></button>
-        <button class="tb-btn" id="tbMax" title="Maximize / restore"><span data-icon="maximize" data-size="17"></span></button>
-        <button class="tb-btn close" id="tbClose" title="Close"><span data-icon="close" data-size="17"></span></button>
+        <button class="tb-btn" id="tbPin" data-tip="Always on top" aria-label="Always on top"><span data-icon="pin" data-size="17"></span></button>
+        <button class="tb-btn" id="tbMin" data-tip="Minimize" aria-label="Minimize"><span data-icon="minimize" data-size="17"></span></button>
+        <button class="tb-btn" id="tbMax" data-tip="Maximize / restore" aria-label="Maximize or restore"><span data-icon="maximize" data-size="17"></span></button>
+        <button class="tb-btn close" id="tbClose" data-tip="Close" aria-label="Close"><span data-icon="close" data-size="17"></span></button>
       </div>
 
       <!-- ------- toolbar (second row) ------- -->
@@ -89,7 +89,7 @@
       </div>
 
       <!-- center play -->
-      <button class="center-play paused" id="centerPlay" title="Play (Space)"><span data-icon="play" data-size="34"></span></button>
+      <button class="center-play paused" id="centerPlay" data-tip="Play (Space)" aria-label="Play"><span data-icon="play" data-size="34"></span></button>
 
       <!-- seek feedback -->
       <div class="seek-fx left" id="seekFxLeft">
@@ -114,7 +114,7 @@
           <span style="color:var(--text-sub)" data-icon="playlist" data-size="17"></span>
           <span class="ptitle">Playlist</span>
           <span class="chip" id="plChip">0 items</span>
-          <button class="dbtn close-panel" title="Close (Esc)"><span data-icon="close" data-size="16"></span></button>
+          <button class="dbtn close-panel" data-tip="Close (Esc)" aria-label="Close"><span data-icon="close" data-size="16"></span></button>
         </div>
         <div class="psearch"><span data-icon="search" data-size="15"></span><input id="plSearch" placeholder="Search playlist…"></div>
         <div class="list-head">
@@ -140,7 +140,7 @@
           <span style="color:var(--text-sub)" data-icon="settings" data-size="17"></span>
           <span class="ptitle">Settings</span>
           <button class="dbtn" id="setResetBtn" data-tip="Reset settings"><span data-icon="reset" data-size="16"></span></button>
-          <button class="dbtn close-panel" title="Close (Esc)"><span data-icon="close" data-size="16"></span></button>
+          <button class="dbtn close-panel" data-tip="Close (Esc)" aria-label="Close"><span data-icon="close" data-size="16"></span></button>
         </div>
         <div class="panel-body">
 
@@ -252,13 +252,13 @@
               </select></div>
             <div class="row"><span class="lbl">Text colour</span>
               <div class="swatches" id="subColors">
-                <button class="swatch on" data-c="#ffffff" style="background:#ffffff" title="White"></button>
-                <button class="swatch" data-c="#FFE680" style="background:#FFE680" title="Soft yellow"></button>
-                <button class="swatch" data-c="#7CF6C0" style="background:#7CF6C0" title="Mint"></button>
-                <button class="swatch" data-c="#FFB48A" style="background:#FFB48A" title="Peach"></button>
-                <button class="swatch" data-c="#9CCBFF" style="background:#9CCBFF" title="Sky"></button>
-                <button class="swatch" data-c="#FF9AA6" style="background:#FF9AA6" title="Rose"></button>
-                <input type="color" id="setSubColor" value="#ffffff" title="Any colour">
+                <button class="swatch on" data-c="#ffffff" style="background:#ffffff" data-tip="White" aria-label="White"></button>
+                <button class="swatch" data-c="#FFE680" style="background:#FFE680" data-tip="Soft yellow" aria-label="Soft yellow"></button>
+                <button class="swatch" data-c="#7CF6C0" style="background:#7CF6C0" data-tip="Mint" aria-label="Mint"></button>
+                <button class="swatch" data-c="#FFB48A" style="background:#FFB48A" data-tip="Peach" aria-label="Peach"></button>
+                <button class="swatch" data-c="#9CCBFF" style="background:#9CCBFF" data-tip="Sky" aria-label="Sky"></button>
+                <button class="swatch" data-c="#FF9AA6" style="background:#FF9AA6" data-tip="Rose" aria-label="Rose"></button>
+                <input type="color" id="setSubColor" value="#ffffff" data-tip="Any colour" aria-label="Any colour">
               </div></div>
             <div class="row"><span class="lbl">Shadow</span>
               <div class="seg" data-set="subshadow">
@@ -284,6 +284,7 @@
               <button class="btn" id="subDelayMinus">−0.5s</button><span class="val" id="subDelayVal">0 ms</span><button class="btn" id="subDelayPlus">+0.5s</button>
               <button class="btn" id="subDelayReset">Reset</button></div>
             <div class="row"><span class="lbl">Active subtitle</span><select id="subTracks"><option>Off</option></select></div>
+            <div class="row"><span class="lbl">Auto-load subtitles<div class="sub">Remembered file → best sidecar → first embedded track</div></span><div class="switch on" data-set="subautoload"></div></div>
             <div class="row"><span class="lbl">Load subtitle file…</span><button class="btn accent" id="subLoadBtn">Browse</button></div>
             <div class="row"><span class="lbl">Subtitle appearance</span>
               <button class="btn" id="subResetBtn">Reset look</button></div>
@@ -333,7 +334,7 @@
 
       <!-- ============ DOCK ============ -->
       <footer class="dock" id="dock">
-        <div class="seekbar" id="seekbar" title="Seek">
+        <div class="seekbar" id="seekbar">
           <div class="track">
             <div class="buffered" id="sbBuffered"></div>
             <div class="chip-ab hidden" id="sbAB"></div>
@@ -349,7 +350,7 @@
           <button class="dbtn" id="btnNext" data-tip="Next — Ctrl+→"><span data-icon="next" data-size="19"></span></button>
           <div class="vol">
             <button class="dbtn" id="btnMute" data-tip="Mute — M"><span data-icon="volume-high" data-size="19"></span></button>
-            <div class="rail" id="volRail" title="Volume"><div class="track"><div class="fill" id="volFill" style="width:65%"></div><div class="dot" id="volDot" style="left:65%"></div></div></div>
+            <div class="rail" id="volRail" data-tip="Volume" aria-label="Volume"><div class="track"><div class="fill" id="volFill" style="width:65%"></div><div class="dot" id="volDot" style="left:65%"></div></div></div>
           </div>
           <span class="time"><span class="now" id="tNow">00:00</span> <span class="dur" id="tDur">/ 00:00</span></span>
           <span class="chip" id="tSpeed" style="display:none">1×</span>
@@ -370,8 +371,8 @@
       <span class="mtitle" id="miniTitle">Lumen</span>
       <div class="mbar" id="miniBar2"><i id="miniFill"></i></div>
       <span class="mtime" id="miniTime">00:00 / 00:00</span>
-      <button class="dbtn" id="miniRestore" title="Restore"><span data-icon="fullscreen" data-size="18"></span></button>
-      <button class="dbtn" id="miniClose" title="Close"><span data-icon="close" data-size="18"></span></button>
+      <button class="dbtn" id="miniRestore" data-tip="Restore" aria-label="Restore"><span data-icon="fullscreen" data-size="18"></span></button>
+      <button class="dbtn" id="miniClose" data-tip="Close" aria-label="Close"><span data-icon="close" data-size="18"></span></button>
     </div>
 
     <!-- ============================ OVERLAYS ============================ -->

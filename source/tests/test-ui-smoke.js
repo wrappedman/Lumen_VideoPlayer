@@ -194,6 +194,91 @@ function check(name, fn) { fn(); passed++; console.log('PASS ' + name); }
   L.UI.setMode('window'); await wait(40);
   check('resize and mode switches throw nothing', function () { assert.ok(true); });
 
+  /* ---------- shared tooltip: appears, is not clipped by the panel, hides ---------- */
+  const resetBtn = $('#setResetBtn');
+  resetBtn.dispatchEvent(new w.MouseEvent('pointerover', { bubbles: true }));
+  await wait(380);
+  const tip = w.document.querySelector('.app-tip');
+  check('tooltip appears above panel buttons after a short delay', function () {
+    assert.ok(tip, 'shared tooltip element exists');
+    assert.ok(tip.classList.contains('show'), 'tooltip is shown');
+    assert.match(tip.textContent, /Reset settings/);
+  });
+  resetBtn.dispatchEvent(new w.MouseEvent('pointerout', { bubbles: true, relatedTarget: w.document.body }));
+  await wait(30);
+  const hiddenAfterOut = !tip.classList.contains('show');
+  resetBtn.dispatchEvent(new w.MouseEvent('pointerover', { bubbles: true }));
+  await wait(380);
+  const shownAgain = tip.classList.contains('show');
+  w.dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true }));
+  await wait(30);
+  check('tooltip hides on pointer-out and on any click', function () {
+    assert.ok(hiddenAfterOut, 'hidden after pointer-out');
+    assert.ok(shownAgain, 'shown again on re-enter');
+    assert.ok(!tip.classList.contains('show'), 'hidden after pointerdown');
+  });
+
+  /* ---------- subtitles: auto-load, streaming parse, per-frame paint ---------- */
+  api.sidecar_subtitles = () => Promise.resolve([{ path: '/movs/movie.fa.srt', label: 'movie.fa.srt' }]);
+  w.fetch = () => Promise.resolve({
+    ok: true, body: null,
+    text: () => Promise.resolve('WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nسلام زیرنویس\n\n00:01:00.000 --> 00:01:05.000\nخط دوم\n')
+  });
+  L.loadItem({ name: 'movie.mkv', path: '/movs/movie.mkv', dur: 600 });
+  await wait(160);
+  check('the best sidecar subtitle auto-loads and parses', function () {
+    assert.ok(L.Player.subActive, 'a track was picked automatically');
+    assert.equal(L.Player.subActive.kind, 'external');
+    assert.equal(L.Player.subCues.length, 2);
+    assert.equal(L.Player.subCues[0].text, 'سلام زیرنویس');
+  });
+  api.sidecar_subtitles = () => Promise.resolve([]);
+
+  /* streaming reader path: cues painted chunk by chunk, Persian intact.
+     TextDecoder is removed first, so this also exercises the built-in
+     UTF-8 fallback decoder (multi-byte Persian sequences included). */
+  const hadDecoder = w.TextDecoder;
+  try { delete w.TextDecoder; } catch (e) { w.TextDecoder = undefined; }
+  const enc = (str) => new Uint8Array(Buffer.from(str, 'utf8'));
+  /* the second chunk is cut INSIDE a two-byte Persian letter — the fallback
+     decoder must carry the half character over to the next chunk */
+  const rest = enc('سلام استریم\n\n00:20:00.000 --> 00:20:05.000\nپایان\n\n');
+  const chunks = [
+    enc('WEBVTT\n\n00:00:02.000 --> 00:00:04.000\n'),
+    rest.slice(0, 1),
+    rest.slice(1)
+  ];
+  let ci = 0;
+  w.fetch = () => Promise.resolve({
+    ok: true,
+    body: { getReader: () => ({ read: () => Promise.resolve(ci < chunks.length ? { done: false, value: chunks[ci++] } : { done: true }) }) }
+  });
+  L.Player.setSubtitle({ id: 's:2', label: 'FA · ass', kind: 'embedded', codec: 'ass' });
+  await wait(160);
+  check('embedded tracks parse progressively from the stream', function () {
+    assert.ok(L.Player.subActive, 'embedded track active');
+    assert.equal(L.Player.subCues.length, 2, 'both streamed cues parsed');
+    assert.equal(L.Player.subCues[0].text, 'سلام استریم');
+    assert.equal(L.Player.subCues[1].start, 1200);
+    const url = w.Lumen ? L.Player._lastSubUrl || '' : '';
+  });
+  /* the ASS track must take the ass-safe extractor route */
+  const assUrl = L.Bridge.subUrl(L.Player.item, 's:2', 0, 0, 'ass');
+  check('ASS tracks request the ass-safe conversion', function () {
+    assert.ok(/&fmt=ass/.test(assUrl), 'fmt=ass in ' + assUrl);
+    const atUrl = L.Bridge.subUrl(L.Player.item, 's:2', 0, 3600, 'ass');
+    assert.ok(/&at=3600/.test(atUrl), 'resume hint in ' + atUrl);
+  });
+  if (hadDecoder) w.TextDecoder = hadDecoder;
+  /* switching the subtitle off must abort the in-flight stream cleanly */
+  L.Player.setSubtitle(null, true);
+  await wait(30);
+  check('switching subtitles off clears the cues', function () {
+    assert.equal(L.Player.subActive, null);
+    assert.equal(L.Player.subCues.length, 0);
+  });
+  delete w.fetch;
+
   check('no uncaught renderer errors', function () {
     assert.deepEqual(errors, []);
   });

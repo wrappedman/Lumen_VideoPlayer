@@ -1384,6 +1384,62 @@
     renderTitle();
   });
 
+  /* ------------------------------------------------------------------ tooltips
+     One shared tooltip for every control. The old ::after tips were clipped
+     by the panels (overflow:hidden — the settings header showed a sliver
+     instead of a tip) and the native title= tips lagged and looked alien.
+     This one is position:fixed, so no panel can clip it, and it flips below
+     the control when there is no room above it. */
+  var tipEl = null, tipTimer = 0, tipTarget = null;
+  function tipHide() {
+    if (tipTimer) { clearTimeout(tipTimer); tipTimer = 0; }
+    tipTarget = null;
+    if (tipEl) tipEl.classList.remove('show');
+  }
+  function tipShow(node) {
+    if (!tipEl) {
+      tipEl = document.createElement('div');
+      tipEl.className = 'app-tip';
+      tipEl.setAttribute('role', 'tooltip');
+      document.body.appendChild(tipEl);
+    }
+    var txt = node.getAttribute('data-tip') || '';
+    if (!txt) return;
+    tipEl.textContent = txt;
+    tipEl.classList.add('show');
+    /* measure after the text is in, then place with room to spare */
+    var r = node.getBoundingClientRect();
+    var tw = tipEl.offsetWidth || 0, th = tipEl.offsetHeight || 0;
+    var vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+    var x = clamp(r.left + r.width / 2 - tw / 2, 8, Math.max(8, vw - tw - 8));
+    var above = r.top - th - 10 >= 8;
+    var y = above ? (r.top - th - 10) : Math.min(r.bottom + 10, Math.max(8, vh - th - 8));
+    tipEl.style.left = Math.round(x) + 'px';
+    tipEl.style.top = Math.round(y) + 'px';
+  }
+  document.addEventListener('pointerover', function (e) {
+    if (e.pointerType === 'touch') return;
+    var node = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (node === tipTarget) return;
+    tipHide();
+    if (!node || !node.getAttribute('data-tip')) return;
+    tipTarget = node;
+    tipTimer = setTimeout(function () {
+      if (tipTarget !== node || !document.contains(node)) { tipHide(); return; }
+      tipShow(node);
+    }, 240);
+  }, true);
+  document.addEventListener('pointerout', function (e) {
+    if (!tipTarget) return;
+    var to = e.relatedTarget;
+    if (to && to.closest && to.closest('[data-tip]') === tipTarget) return;   /* still inside the same control */
+    tipHide();
+  }, true);
+  window.addEventListener('pointerdown', tipHide, true);
+  window.addEventListener('blur', tipHide);
+  document.addEventListener('scroll', tipHide, true);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') tipHide(); }, true);
+
   /* ------------------------------------------------------------------ demo scenes
      The idle artwork is a full-screen JPEG. Only the visible scene is decoded
      and painted; the second one is fetched the first time it is needed
