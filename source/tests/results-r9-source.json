@@ -16,8 +16,8 @@
     },
     {
       "suite": "Settings, bridge parity, shortcuts, delete safety, volume and performance static checks",
-      "passed": 13,
-      "total": 13,
+      "passed": 14,
+      "total": 14,
       "covers": [
         "preload.js METHOD list matches main.js handlers and every renderer call",
         "PageDown/PageUp wrap through the playlist and Delete trashes + continues",
@@ -25,7 +25,8 @@
         "playlist painting is coalesced, signature-cached and O(n)",
         "hydrate no longer registers/probes every file",
         "closed panels and hidden overlays are visibility:hidden; no idle animations",
-        "mute keeps the remembered level; [ and ] change the speed"
+        "mute keeps the remembered level; [ and ] change the speed",
+        "build works without NSIS; logo/icon assets are consistent"
       ]
     },
     {
@@ -63,7 +64,9 @@
       "no per-file probing on hydrate",
       "hidden glass surfaces removed from the render tree; idle spinner/equaliser animations fixed",
       "real low-resource mode, bounded metadata caches, debounced config writes, ETag/304 statics",
-      "mute no longer zeroes the remembered volume; [ and ] speed keys work again"
+      "mute no longer zeroes the remembered volume; [ and ] speed keys work again",
+      "the BAT no longer aborts when NSIS is missing (portable app + ZIP instead)",
+      "new vector logo and 7-frame icon.ico"
     ]
   }
 }

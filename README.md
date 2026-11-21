@@ -64,7 +64,7 @@ flowchart LR
 2. وارد پوشهٔ `source` شوید.
 3. در Windows فایل `build-windows-r9.bat` را اجرا کنید.
 
-**پیش‌نیازها:** Windows x64، Node.js **22.12 یا جدیدتر**، NSIS 3.x و اتصال اینترنت برای دریافت dependencyها و runtimeهای پین‌شده. BAT وجود NSIS را در PATH و مسیرهای استاندارد بررسی می‌کند.
+**پیش‌نیازها:** Windows x64، Node.js **22.12 یا جدیدتر** و اتصال اینترنت برای دریافت dependencyها و runtimeهای پین‌شده. **NSIS 3.x اختیاری است** و فقط برای ساختن فایل نصاب لازم است؛ اگر نصب نباشد بیلد باز هم موفق می‌شود، `Lumen.exe` پرتابل ساخته می‌شود و `Lumen-portable-1.0.0-r9.zip` هم برای اشتراک‌گذاری ساخته می‌شود. برای ساختن نصاب: `winget install --id NSIS.NSIS -e` (یا `choco install nsis -y`) و اجرای دوباره‌ی BAT؛ اسکریپت‌ها خودشان NSIS را در PATH، `NSIS_DIR`، پوشه‌های معمول و کلید رجیستری پیدا می‌کنند.
 
 خروجی در پوشهٔ `build\r9\windows` کنار پوشهٔ `source` قرار می‌گیرد و شامل نسخهٔ قابل‌حمل و نصاب per-user است. فایل‌های اجرایی در ZIP سورس قرار ندارند.
 
@@ -126,7 +126,7 @@ R9 شامل اصلاح تشخیص زیرنویس‌های کناری و حذف P
 
 ### Build
 
-Download and extract [`Lumen-source-r9.zip`](./Lumen-source-r9.zip), enter `source/`, then run `build-windows-r9.bat` on Windows x64. Requirements: Node.js 22.12+, NSIS 3.x, and Internet access. Build output is created outside `source/` under `build/r9/windows`; this repository artifact itself contains source only, with no EXE or installer.
+Download and extract [`Lumen-source-r9.zip`](./Lumen-source-r9.zip), enter `source/`, then run `build-windows-r9.bat` on Windows x64. Requirements: Node.js 22.12+ and Internet access. **NSIS 3.x is optional** and only needed for the `Lumen-Setup` installer: without it the build still completes with the portable app plus a shareable `Lumen-portable-1.0.0-r9.zip`; install it with `winget install --id NSIS.NSIS -e` (or `choco install nsis -y`) and run the BAT again. Build output is created outside `source/` under `build/r9/windows`; this repository artifact itself contains source only, with no EXE or installer.
 
 The BAT retries a Schannel download failure such as `CRYPT_E_REVOCATION_OFFLINE` with `curl --ssl-no-revoke`; certificate-chain/hostname validation and pinned SHA-256 checks remain in place. This is a build-time download fallback only.
 

@@ -36,7 +36,7 @@ The app does **not** download or install FFmpeg at runtime. Choosing a custom FF
 
 ## Use after building on Windows
 
-Run `build-windows-r9.bat` from this source folder. It creates the installer and portable app under the parent folder's `build\r9\windows` directory; nothing is prebuilt in this source ZIP. The following commands apply only after that local build:
+Run `build-windows-r9.bat` from this source folder. It always creates the **portable app** and, when NSIS 3.x is available, the **installer**, both under the parent folder's `build\r9\windows` directory; nothing is prebuilt in this source ZIP. **NSIS is optional** — it only packs the installer. Without it the script finishes successfully, tells you where `Lumen.exe` is, and writes `Lumen-portable-1.0.0-r9.zip` instead. The following commands apply only after that local build:
 
 ```bat
 Lumen-Setup-1.0.0-r9.exe                 &REM normal install + Start Menu
@@ -59,7 +59,9 @@ Lumen probes a file with ffprobe and routes incompatible video/audio through FFm
 
 ## Build from source
 
-Requirements: Node.js 22.12 or newer, `unzip` or `7z`, the official Electron 44.5.1 Windows x64 runtime ZIP, and (for the installer) NSIS 3.x (`makensis`). The ZIP is not the npm Electron package; put it at `.electron/electron-v44.5.1-win32-x64.zip` or pass `--zip <path>`. The supplied `build-windows-r9.bat` can download and verify both pinned runtime archives.
+Requirements: Node.js 22.12 or newer, `unzip` or `7z`, and the official Electron 44.5.1 Windows x64 runtime ZIP. The ZIP is not the npm Electron package; put it at `.electron/electron-v44.5.1-win32-x64.zip` or pass `--zip <path>`. The supplied `build-windows-r9.bat` can download and verify both pinned runtime archives.
+
+NSIS 3.x (`makensis`) is **optional** and only needed for the `Lumen-Setup` installer. When it is missing, the build still succeeds with the portable app and a shareable `Lumen-portable-1.0.0-r9.zip`. `build-installer.js` searches PATH, `NSIS_DIR`, the usual install folders (including Chocolatey, Scoop and the `winget` link folder) and the NSIS registry key, so `winget install --id NSIS.NSIS -e` (or `choco install nsis -y`) is enough for it to be picked up on the next run. It also accepts `--makensis "C:\path\makensis.exe"` for unusual installations.
 
 ```bash
 npm install
@@ -69,6 +71,15 @@ node tools/build-installer.js --revision r9
 ```
 
 `prepare-ffmpeg.js` stores the verified archive under `~/.cache/lumen-build/`. It is a developer build helper; the installed app never invokes it. The expected FFmpeg archive digest is recorded in `tools/pack.js` and the bundled engine's `BUILD-INFO.txt`.
+
+Brand assets: `assets/lumen-mark.svg` is the source of the logo. `assets/lumen-mark.png` (512 px, also served as the favicon from `web/assets/`) and the 7-frame `assets/icon.ico` used for the window, the taskbar and `Lumen.exe` are generated from it:
+
+```bash
+npm install --no-save sharp     # optional tooling, not a build dependency
+node tools/make-icons.js
+```
+
+The 16/24 px frames are drawn from a 9 % larger mark (optical sizing) and every .ico frame except 256 px is a DIB, so Windows and the `resedit` icon stamper both read it.
 
 Other commands:
 
@@ -104,7 +115,7 @@ Application code is MIT-licensed; that does not replace the separate terms that 
 
 ```bash
 node tests/test-sidecar-matcher.js        # 8 checks, no dependencies
-node tests/test-source-ui.js              # 13 static checks
+node tests/test-source-ui.js              # 14 static checks
 npm install --no-save jsdom               # optional, only for the next one
 node tests/test-keyboard-renderer.js      # 8 headless UI checks
 node tests/test-ui-smoke.js               # 12 interaction checks

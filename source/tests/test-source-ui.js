@@ -15,6 +15,7 @@ const preload = read('preload.js');
 const mainJs = read('main.js');
 const store = read('host/store.js');
 const installer = read('tools/build-installer.js');
+const pack = read('tools/pack.js');
 const bat = read('build-windows-r9.bat');
 const results = [];
 function check(name, fn) {
@@ -62,6 +63,11 @@ check('R9 BAT build ID/output, Node/NSIS prerequisites, and revocation fallback 
   assert.ok(bat.includes('--revision r9'));
   assert.ok(bat.includes('Node.js 22.12 or newer'));
   assert.ok(bat.includes('where.exe makensis.exe'));
+  /* NSIS must be a late, optional step: a missing makensis used to abort the
+     build before the portable app was even assembled */
+  assert.ok(bat.indexOf('[5/5]') < bat.indexOf('node tools\\build-installer.js'));
+  assert.ok(bat.indexOf('node tools\\build-windows.js') < bat.indexOf('call :find_nsis'));
+  assert.doesNotMatch(bat, /NSIS 3\.x was not found on PATH or in its standard folders/);
   assert.equal((bat.match(/curl\.exe --ssl-no-revoke/g) || []).length, 2);
   assert.match(bat, /FFMPEG_SHA/);
   assert.match(bat, /ELECTRON_SHA/);
@@ -166,6 +172,38 @@ check('mute keeps the remembered level and the speed keys work', function () {
   /* [ and ] used to snap straight back to a preset and do nothing */
   assert.match(shell, /case '\[': case '\]': \{/);
   assert.doesNotMatch(shell, /P\.setSpeed\(Math\.(min|max)[^\n]*L\.UI\.cycleSpeed\(0\)/);
+});
+
+
+check('the build no longer depends on NSIS and the new icon is wired end to end', function () {
+  /* build-installer: graceful skip (exit 3) + wide makensis discovery */
+  assert.match(installer, /const EXIT_NO_NSIS = 3;/);
+  assert.match(installer, /process\.exit\(EXIT_NO_NSIS\);/);
+  assert.match(installer, /arg\('--makensis'\)/);
+  assert.match(installer, /reg\.exe/);
+  assert.match(installer, /NSIS_DIR/);
+  /* the BAT maps that code to the "portable only" path instead of :fail */
+  assert.match(bat, /if "%ERRORLEVEL%"=="3" goto :nsis_missing/);
+  assert.match(bat, /^:no_nsis$/m);
+  assert.match(bat, /Compress-Archive/);
+  /* build-installer may only fail hard on a genuine error */
+  assert.match(bat, /if errorlevel 1 goto :fail/);
+
+  /* logo: vector source + rasters, all generated from the same mark */
+  const mark = fs.readFileSync(path.join(root, 'assets', 'lumen-mark.svg'), 'utf8');
+  assert.match(mark, /viewBox="0 0 512 512"/);
+  assert.match(mark, /<g id="mark">/);
+  const ico = fs.readFileSync(path.join(root, 'assets', 'icon.ico'));
+  assert.equal(ico.readUInt16LE(2), 1, 'icon.ico is an icon file');
+  assert.equal(ico.readUInt16LE(4), 7, 'icon.ico carries seven frames');
+  const png = fs.readFileSync(path.join(root, 'assets', 'lumen-mark.png'));
+  assert.equal(png.slice(1, 4).toString('ascii'), 'PNG');
+  assert.ok(png.readUInt32BE(16) === 512 && png.readUInt32BE(20) === 512, '512×512 master');
+  /* the renderer favicon must be the same artwork the window uses */
+  assert.deepEqual(fs.readFileSync(path.join(root, 'web', 'assets', 'lumen-mark.png')), png);
+  assert.deepEqual(fs.readFileSync(path.join(root, 'assets', 'icon.png')), png);
+  /* and the .exe icon still comes from assets/icon.ico */
+  assert.match(pack, /'assets', 'icon\.ico'/);
 });
 
 

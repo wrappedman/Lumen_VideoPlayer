@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"
+     role="img" aria-label="Lumen Video Player">
+  <defs>
+    <linearGradient id="bg" x1="0.08" y1="0" x2="0.92" y2="1">
+      <stop offset="0" stop-color="#FF8263"/>
+      <stop offset="0.5" stop-color="#EC3549"/>
+      <stop offset="1" stop-color="#B81C36"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.3" cy="0" r="0.62">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.14"/>
+      <stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.035"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.42"/>
+      <stop offset="0.35" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="496" height="496" rx="116" fill="url(#bg)"/>
+  <rect x="8" y="8" width="496" height="496" rx="116" fill="url(#glow)"/>
+  <rect x="8.75" y="8.75" width="494.5" height="494.5" rx="115.25" fill="none" stroke="url(#edge)" stroke-width="1.5"/>
+  <g id="mark"><path d="M 223.43 164.39 A 22.00 22.00 0 0 0 190.67 183.57 L 190.67 328.43 A 22.00 22.00 0 0 0 223.43 347.61 L 352.48 275.19 A 22.00 22.00 0 0 0 352.48 236.81 Z" fill="#FFFFFF"/></g>
+</svg>
