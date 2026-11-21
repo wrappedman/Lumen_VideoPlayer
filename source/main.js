@@ -15,6 +15,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu, screen, globalShortcut, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const https = require('https');
 const http = require('http');
 const util = require('./host/util');
@@ -76,9 +77,45 @@ let miniUserMoved = false;   /* the user dragged it since then */
 let quitting = false;
 let closing = false;
 let bootArgs = [];
-const uploads = new Map();          /* drop id -> { file, stream, received } */
+const uploads = new Map();          /* drop id -> { file, stream, received, at } */
 const probeWarm = new Map();        /* path -> probe info (token hand-out warm-up) */
 const PROBE_WARM_MAX = 40;          /* a folder can hold thousands of files */
+
+/* a chunked upload that never finished (renderer died, drop cancelled) would
+   otherwise keep its stream and temp file forever */
+function sweepUploads() {
+  const now = Date.now();
+  uploads.forEach(function (up, id) {
+    if (now - (up.at || 0) < 3600e3) return;
+    uploads.delete(id);
+    try { up.stream.destroy(); } catch (e) { }
+    try { fs.unlinkSync(up.file); } catch (e) { }
+  });
+}
+
+/* the app leaves three caches in the OS temp dir: thumbnails, converted
+   subtitles and chunked drop uploads. They are all safe to rebuild, so trim
+   whatever is older than two days instead of letting temp grow forever. */
+function cleanupTempCaches() {
+  const dirs = [
+    path.join(os.tmpdir(), 'lumen-thumbs'),
+    path.join(os.tmpdir(), 'lumen-subs'),
+    path.join(app.getPath('temp'), 'lumen-drop')
+  ];
+  const maxAge = 2 * 24 * 3600 * 1000;
+  const now = Date.now();
+  dirs.forEach(function (dir) {
+    let names;
+    try { names = fs.readdirSync(dir); } catch (e) { return; }
+    names.forEach(function (n) {
+      const f = path.join(dir, n);
+      try {
+        const st = fs.statSync(f);
+        if (st.isFile() && now - st.mtimeMs > maxAge) fs.unlinkSync(f);
+      } catch (e) { }
+    });
+  });
+}
 
 /* keep the metadata cache bounded: an unbounded Map kept every probe result
    (and every stream's metadata) alive for the whole session */
@@ -142,7 +179,10 @@ function rememberMiniPos() {
 function rememberBounds() {
   if (!win || isMini || win.isDestroyed()) return;
   try {
-    const b = win.getBounds();
+    /* getBounds() of a *maximized* window is the maximized rectangle — saving
+       it would make the next unmaximize fill the whole work area. The normal
+       bounds are what "restore" should bring back. */
+    const b = (win.isMaximized() || win.isFullScreen()) ? win.getNormalBounds() : win.getBounds();
     const prev = store.windowState() || {};
     store.setWindowState({
       x: b.x, y: b.y, width: b.width, height: b.height,
@@ -188,6 +228,7 @@ function createWindow() {
     win.show();
     const st = store.windowState() || {};
     if (st.maximized) win.maximize();
+    if (st.fullscreen) win.setFullScreen(true);   /* restore a fullscreen session too */
     if (IS_DEV && !app.isPackaged && process.argv.indexOf('--devtools') >= 0) {
       win.webContents.openDevTools({ mode: 'detach' });
     }
@@ -210,11 +251,19 @@ function createWindow() {
     log('renderer gone:', details && details.reason);
   });
 
-  /* dev conveniences (F12 = devtools) */
+  /* closing the window ends all playback for good — clear the temp caches so
+     thumbnails, converted subtitles and dropped files do not pile up */
+  win.on('close', function () {
+    cleanupTempCaches();
+    sweepUploads();
+  });
+
+  /* dev conveniences (F12 = devtools, Ctrl+R = reload) — dev builds only:
+     a shipped player must not open DevTools on a stray keypress */
   win.webContents.on('before-input-event', function (e, input) {
-    if (input.type !== 'keyDown') return;
+    if (input.type !== 'keyDown' || !IS_DEV) return;
     if (input.key === 'F12') { win.webContents.toggleDevTools(); e.preventDefault(); }
-    if (IS_DEV && (input.control || input.meta) && input.key.toLowerCase() === 'r') {
+    if ((input.control || input.meta) && input.key.toLowerCase() === 'r') {
       win.webContents.reloadIgnoringCache(); e.preventDefault();
     }
   });
@@ -234,13 +283,24 @@ function createWindow() {
     }
     scheduleBounds();
   });
-  win.on('maximize', scheduleBounds);
-  win.on('unmaximize', scheduleBounds);
+  win.on('maximize', function () {
+    /* keep the UI mode in sync no matter *how* the window was maximized —
+       title-bar double-click, the dock button or an Aero Snap all land here */
+    notifyUi("if(window.Lumen&&Lumen.UI&&Lumen.UI.el.body.dataset.mode!=='full'&&Lumen.UI.el.body.dataset.mode!=='mini'){Lumen.UI.setMode('max');}");
+    scheduleBounds();
+  });
+  win.on('unmaximize', function () {
+    notifyUi("if(window.Lumen&&Lumen.UI&&Lumen.UI.el.body.dataset.mode==='max'){Lumen.UI.setMode('window');}");
+    scheduleBounds();
+  });
 
   win.on('enter-full-screen', function () { notifyUi("Lumen.UI.setMode('full')"); });
   win.on('leave-full-screen', function () {
     if (isMini) return;
-    notifyUi("if(Lumen.UI.el.body.dataset.mode==='full'){Lumen.UI.setMode('window');}");
+    /* after leaving fullscreen the window may still be maximized — pick the
+       mode that matches the real OS state instead of blindly falling back */
+    if (win.isMaximized()) notifyUi("if(Lumen.UI.el.body.dataset.mode==='full'){Lumen.UI.setMode('max');}");
+    else notifyUi("if(Lumen.UI.el.body.dataset.mode==='full'){Lumen.UI.setMode('window');}");
   });
 
   win.on('focus', registerMediaKeys);
@@ -371,7 +431,9 @@ function setMini(on, square) {
     miniUserMoved = false;
     win.setMinimumSize(square ? 300 : 380, square ? 300 : 110);
     win.setBounds({ x: mx, y: my, width: w, height: h }, true);
-    win.setAlwaysOnTop(!!store.settings().ontop || true, 'floating');
+    /* a mini player floats by design (it is meant to hover above other work),
+       regardless of the separate always-on-top preference */
+    win.setAlwaysOnTop(true, 'floating');
   } else if (!on && isMini) {
     isMini = false;
     win.setMinimumSize(480, 300);
@@ -409,7 +471,7 @@ function subtitleCandidates(rawUrl) {
       if (out.indexOf(candidate) < 0) out.push(candidate);
     });
   });
-  return out.slice(0, 24).map(function (p) { return u.origin + p; });
+  return out.slice(0, 24).map(function (p) { return u.origin + p + u.search; });
 }
 
 function probeSubtitleUrl(url, depth) {
@@ -445,14 +507,20 @@ async function remoteProbe(url) {
   if (!/^https?:/i.test(String(url || ''))) { out.error = 'not an http(s) link'; return out; }
   out.ok = true;
 
-  /* 1) sidecar subtitle files next to the stream */
+  /* 1) sidecar subtitle files next to the stream. Signed URLs keep their
+     query string on every candidate — stripping it would ask the server for
+     an unsigned file it then refuses to serve. The probes run in small
+     batches: 24 sequential HEADs made a cold stream wait for minutes. */
   const candidates = subtitleCandidates(url);
-  for (let i = 0; i < candidates.length; i++) {
-    const hit = await probeSubtitleUrl(candidates[i]);
-    if (hit) {
-      const name = decodeURIComponent((candidates[i].split('?')[0].split('/').pop() || 'subtitle'));
-      out.subs.push({ id: 'netfile:' + candidates[i], label: name + ' · online', kind: 'remote', url: candidates[i] });
-    }
+  const BATCH = 6;
+  for (let i = 0; i < candidates.length; i += BATCH) {
+    const hits = await Promise.all(candidates.slice(i, i + BATCH).map(probeSubtitleUrl));
+    hits.forEach(function (hit, j) {
+      if (!hit) return;
+      const candidate = candidates[i + j];
+      const name = decodeURIComponent((candidate.split('?')[0].split('/').pop() || 'subtitle'));
+      out.subs.push({ id: 'netfile:' + candidate, label: name + ' · online', kind: 'remote', url: candidate });
+    });
   }
 
   /* 2) tracks muxed into the stream itself (needs ffmpeg) */
@@ -704,8 +772,10 @@ const handlers = {
             text = JSON.stringify(JSON.parse(json), null, 2);
           } else {
             const data = JSON.parse(json);
+            /* keep URLs (streams are first-class playlist members) and fall
+               back to the name so a file-less entry still round-trips */
             text = '#EXTM3U\n' + (data.items || []).map(function (i) {
-              return '#EXTINF:' + Math.round(i.dur || 0) + ',' + (i.name || '') + '\n' + (i.path || i.url || '');
+              return '#EXTINF:' + Math.round(i.dur || 0) + ',' + (i.name || '') + '\n' + (i.path || i.url || i.name || '');
             }).join('\n') + '\n';
           }
           fs.writeFileSync(r.filePath, text, 'utf8');
@@ -727,13 +797,19 @@ const handlers = {
         try {
           const text = fs.readFileSync(file, 'utf8');
           if (/\.json$/i.test(file)) { resolve(text); return; }
-          /* M3U / M3U8 → the same shape the player stores */
+          /* M3U / M3U8 → the same shape the player stores. A line that is not
+             a local file is treated as a stream URL instead of being dropped. */
           const items = [];
           text.split(/\r?\n/).forEach(function (line) {
             line = line.trim();
             if (!line || line.charAt(0) === '#') return;
             let p = line;
             try { if (p.indexOf('file:///') === 0) p = decodeURIComponent(p.slice(8)); } catch (e) { }
+            if (/^https?:\/\//i.test(p)) {
+              const base = decodeURIComponent((p.split('?')[0].split('/').pop() || 'stream')) || 'stream';
+              items.push({ path: '', name: base, ext: util.extName(base), dur: 0, w: 0, h: 0, url: p, subs: null });
+              return;
+            }
             if (!util.isFile(p)) return;
             const e = util.extName(p);
             if (!util.isMediaExt(e)) return;
@@ -812,10 +888,11 @@ const handlers = {
   },
   drop_begin: function (id, size) {
     try {
+      sweepUploads();                 /* never leak a half-finished import */
       const dir = path.join(app.getPath('temp'), 'lumen-drop');
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, 'drop-' + Date.now().toString(36) + '-' + String(id || 'x'));
-      uploads.set(String(id), { file: file, stream: fs.createWriteStream(file), received: 0 });
+      uploads.set(String(id), { file: file, stream: fs.createWriteStream(file), received: 0, at: Date.now() });
       return true;
     } catch (e) { return false; }
   },
@@ -824,10 +901,23 @@ const handlers = {
     if (!up) return false;
     try {
       const buf = Buffer.from(String(b64 || ''), 'base64');
-      up.stream.write(buf);
+      /* respect backpressure: resolve the IPC only once the chunk is flushed,
+         so a slow disk cannot pile gigabytes up in memory */
       up.received += buf.length;
-      return true;
+      up.at = Date.now();
+      return new Promise(function (resolve) {
+        up.stream.write(buf, function () { resolve(true); });
+      });
     } catch (e) { return false; }
+  },
+  /* the renderer aborted the upload (read error, cancelled drop): clean up */
+  drop_abort: function (id) {
+    const up = uploads.get(String(id));
+    if (!up) return false;
+    uploads.delete(String(id));
+    try { up.stream.destroy(); } catch (e) { }
+    try { fs.unlinkSync(up.file); } catch (e) { }
+    return true;
   },
   drop_finish: function (id, name) {
     const up = uploads.get(String(id));

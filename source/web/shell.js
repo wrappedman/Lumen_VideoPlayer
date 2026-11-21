@@ -73,6 +73,16 @@
       { icon: 'repeat', ms: 1500 });
   };
 
+  /* the 20-second autosave used to rewrite config.json unconditionally —
+     now it only flushes when the playlist actually changed */
+  var lastSavedPl = '';
+  function autosavePlaylist() {
+    var ser = JSON.stringify(PL.serialize());
+    if (ser === lastSavedPl) return;
+    lastSavedPl = ser;
+    B.call('save_playlist_silent', ser);
+  }
+
   /* ================================================================== fullscreen / mini / window */
   var prevMode = 'window';
   L.toggleFullscreen = function (force) {
@@ -393,35 +403,51 @@
     }, true);
   });
 
-  /* ================================================================== modals */
+  /* ---------------------------------------------------------------- media info
+     Media info shows the item the user asked about. When it is the one
+     currently loaded, the live probe answers the rows; for a playlist row it
+     probes that path once (cached afterwards) instead of borrowing the
+     playing file's metadata — the old mixup showed "title of A with the
+     codec of B". */
   var Info = {
     open: function (item) {
       item = item || P.item || {};
-      var i = P.info || {};
-      var rows = [
-        ['File', u.esc(item.name || '—')],
-        ['Path', u.esc(item.path || item.url || '—')],
-        ['Duration', (P.dur ? fmtLong(P.dur) : '—')],
-        ['Resolution', (item.w ? item.w + ' × ' + item.h + '  (' + (i.ar || '') + ')' : '—')],
-        ['Video codec', u.esc([i.vcodec, i.profile, i.pixfmt].filter(Boolean).join(' · ') || '—')],
-        ['Frame rate', i.fps ? (i.fps + ' fps' + (i.rfps && i.rfps !== i.fps ? ' (' + i.rfps + ' avg)' : '')) : '—'],
-        ['Bitrate', i.bitrate ? (Math.round(i.bitrate / 1000) + ' kb/s') : '—'],
-        ['HDR', i.hdr ? 'yes' : 'no'],
-        ['Audio', (P.audioTracks.length ? P.audioTracks.map(function (a) { return a.label; }).join(' · ') : (i.acodec || '—'))],
-        ['Subtitles', (P.subTracks.length ? P.subTracks.length + ' track(s)' : 'none')],
-        ['Container', u.esc(i.format || u.extName(item.path || '') || '—')],
-        ['Decode path', P.transcode ? 'ffmpeg bridge (remux/transcode)' : 'hardware/webview2'],
-        ['Host bridge', B.ready ? ('connected · ffmpeg ' + (B.ffmpeg ? 'available' : 'missing')) : 'not attached (demo mode)']
-      ];
-      L.Modal.open('<h2>' + u.icon('film', 18) + 'Media info</h2>' +
-        '<table>' + rows.map(function (r) { return '<tr><td class="k">' + r[0] + '</td><td class="v">' + r[1] + '</td></tr>'; }).join('') + '</table>' +
-        '<div class="mrow"><button class="btn" data-close>Close</button>' +
-        (item.path ? '<button class="btn accent" data-copy>Copy path</button>' : '') + '</div>', {
-        onOpen: function (box) {
-          box.querySelector('[data-close]').addEventListener('click', L.Modal.close);
-          var c = box.querySelector('[data-copy]');
-          if (c) c.addEventListener('click', function () { L.copy(item.name, item.path); });
-        }
+      var finish = function (info, dur, audioTracks, subCount, transcode) {
+        var i = info || {};
+        var rows = [
+          ['File', u.esc(item.name || '—')],
+          ['Path', u.esc(item.path || item.url || '—')],
+          ['Duration', (dur ? fmtLong(dur) : '—')],
+          ['Resolution', (i.width || item.w ? (i.width || item.w) + ' × ' + (i.height || item.h) + '  (' + (i.ar || '') + ')' : '—')],
+          ['Video codec', u.esc([i.vcodec, i.profile, i.pixfmt].filter(Boolean).join(' · ') || '—')],
+          ['Frame rate', i.fps ? (i.fps + ' fps' + (i.rfps && i.rfps !== i.fps ? ' (' + i.rfps + ' avg)' : '')) : '—'],
+          ['Bitrate', i.bitrate ? (Math.round(i.bitrate / 1000) + ' kb/s') : '—'],
+          ['HDR', i.hdr ? 'yes' : 'no'],
+          ['Audio', u.esc(audioTracks && audioTracks.length ? audioTracks.map(function (a) { return a.label; }).join(' · ') : (i.acodec || '—'))],
+          ['Subtitles', u.esc(subCount ? subCount + ' track(s)' : 'none')],
+          ['Container', u.esc(i.format || u.extName(item.path || '') || '—')],
+          ['Decode path', transcode ? 'ffmpeg bridge (remux/transcode)' : 'hardware/webview2'],
+          ['Host bridge', B.ready ? ('connected · ffmpeg ' + (B.ffmpeg ? 'available' : 'missing')) : 'not attached (demo mode)']
+        ];
+        L.Modal.open('<h2>' + u.icon('film', 18) + 'Media info</h2>' +
+          '<table>' + rows.map(function (r) { return '<tr><td class="k">' + r[0] + '</td><td class="v">' + r[1] + '</td></tr>'; }).join('') + '</table>' +
+          '<div class="mrow"><button class="btn" data-close>Close</button>' +
+          (item.path ? '<button class="btn accent" data-copy>Copy path</button>' : '') + '</div>', {
+          onOpen: function (box) {
+            box.querySelector('[data-close]').addEventListener('click', L.Modal.close);
+            var c = box.querySelector('[data-copy]');
+            if (c) c.addEventListener('click', function () { L.copy(item.name, item.path); });
+          }
+        });
+      };
+      /* the item on screen: its live probe is already loaded */
+      if (item === P.item) { finish(P.info, P.dur, P.audioTracks, P.subTracks.length, P.transcode); return; }
+      /* another playlist row: probe that path once and cache the result */
+      if (item._info) { finish(item._info, item._info.duration || item.dur, item._info.audio, (item._info.subs || []).length, false); return; }
+      if (!item.path || !B.ready) { finish(null, item.dur, null, 0, false); return; }
+      B.call('probe', item.path).then(function (info) {
+        if (info) item._info = info;
+        finish(info, (info && info.duration) || item.dur, info && info.audio, info && (info.subs || []).length, false);
       });
     }
   };
@@ -455,6 +481,7 @@
       ['V', 'Cycle subtitles'],
       ['C', 'Load subtitle file'],
       ['B', 'Cycle audio track'],
+      ['G', 'Volume boost (up to 200%)'],
       ['X', 'A-B loop (set A → set B → clear)'],
       ['L', 'Cycle repeat mode'],
       ['Y', 'Media info'],
@@ -463,6 +490,7 @@
       ['U', 'Open URL / stream'],
       ['P / I', 'Playlist / settings panel'],
       ['Mouse wheel', 'Volume · seek · zoom (see Settings)'],
+      ['Seekbar hover', 'Preview thumbnail + chapter title'],
       ['Double-click sides', 'Seek ± ' + S.seekstep + ' s'],
       ['Double-click center', 'Fullscreen'],
       ['Right-click', 'Full player menu'],
@@ -610,6 +638,7 @@
           L.UI.syncWidgets(); L.UI.applyChrome(); L.UI.renderVolume();
           P.applyVideoTransforms(); P.setSpeed(S.speed);
           L.setVolume(S.volume, true);
+          L.Audio.sync();               /* boost/eq/normalize go back to defaults too */
           B.call('set_always_on_top', false);
           L.Modal.close();
           L.Toast.show('Settings reset to defaults', { kind: 'ok', icon: 'check' });
@@ -915,6 +944,9 @@
       case 'c': case 'C': L.pickSubtitles(function (p) { L.UI.attachSubs(P.item, p); }); return;
       case 'b': case 'B': L.UI.cycleAudio(); return;
       case 'y': case 'Y': Info.open(P.item); return;
+      /* Boost (volume > 100%) — a quick gain toggle for quiet sources */
+      case 'g': case 'G': L.setSetting('boost', !S.boost); L.Audio.sync(); L.UI.syncWidgets();
+        L.Toast.show('Volume boost ' + (S.boost ? 'on (up to 200%)' : 'off'), { icon: 'volume-high', ms: 1500 }); return;
       case 'u': case 'U': L.openUrlDialog(); return;
       case 'x': case 'X':
         if (!P.ab) P.abSet('a');
@@ -953,7 +985,8 @@
       case '-': case '_': L.Zoom.zoomAbout(L.Zoom.z / 1.25); return;
       case 'Home': P.seek(0); return;
       case 'End': P.seek(P.dur || 0); return;
-      /* PageDown / PageUp = jump through the playlist (wraps around) */
+      /* PageDown / PageUp = jump through the playlist (wraps around) — a panel
+         or control keeps its own scrolling (inScroller guard, tests stay green) */
       case 'PageDown': e.preventDefault(); P.next(); return;
       case 'PageUp': e.preventDefault(); P.prev(); return;
       /* Delete = trash the playing file and immediately continue with the next */
@@ -963,7 +996,10 @@
         if (L.Modal.isOpen()) { L.Modal.close(); return; }
         if (L.anyPanelOpen()) { L.closePanels(); return; }
         if (L.Zoom.z > 1.001) { L.Zoom.reset(); return; }
-        if (el.body.dataset.mode === 'full' || el.body.dataset.mode === 'max') { L.toggleFullscreen(false); L.UI.setMode('window'); }
+        /* leaving fullscreen via Esc must not also unmaximize the window —
+           the unmaximize event arrives on its own from the OS */
+        if (el.body.dataset.mode === 'full') { L.toggleFullscreen(false); L.UI.setMode('window'); return; }
+        if (el.body.dataset.mode === 'max') { L.UI.setMode('window'); B.call('window_action', 'restore'); return; }
         return;
       }
       case 'F1': e.preventDefault(); L.showShortcuts(); return;
@@ -1131,6 +1167,12 @@
         } catch (e) { }
       }
       if (st.playlist && st.playlist.items) PL.hydrate(st.playlist);
+      /* resume positions arrive with the boot state and pre-fill the local
+         cache — the localStorage mirror dies with the port, so the host is
+         the one place a "continue where I left off" can survive a restart */
+      if (st.resume) {
+        try { L.resumeSeed(st.resume); } catch (e) { }
+      }
       L.UI.syncWidgets();
       L.UI.applyChrome();
       L.UI.renderVolume();
@@ -1265,8 +1307,9 @@
       B.call('settings_set', JSON.stringify(S));
       try { B.call('save_playlist_silent', JSON.stringify(PL.serialize())); } catch (e) { }
     });
-    /* autosave the playlist (the host keeps it in config.json) */
-    setInterval(function () { B.call('save_playlist_silent', JSON.stringify(PL.serialize())); }, 20000);
+    /* autosave the playlist (the host keeps it in config.json) — only when
+       the list really changed, not every 20 s by the clock */
+    setInterval(autosavePlaylist, 20000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

@@ -30,9 +30,39 @@ function createStore(file) {
 
   let timer = null;
 
+  /* the config file must not grow without bounds: resume positions and
+     remembered subtitle picks accumulate one entry per file ever played.
+     Anything beyond a few hundred stale entries is pruned (oldest first) on
+     every write — a fresh file always keeps its own entry. */
+  const RESUME_KEEP = 300;
+  const SUBS_KEEP = 300;
+
+  function prune() {
+    try {
+      const resume = data.resume;
+      if (resume && typeof resume === 'object') {
+        const keys = Object.keys(resume);
+        if (keys.length > RESUME_KEEP) {
+          keys.sort(function (a, b) { return ((resume[a] && resume[a].at) || 0) - ((resume[b] && resume[b].at) || 0); });
+          keys.slice(0, keys.length - RESUME_KEEP).forEach(function (k) { delete resume[k]; });
+        }
+      }
+      const subs = data.subs;
+      if (subs && typeof subs === 'object') {
+        const keys = Object.keys(subs);
+        if (keys.length > SUBS_KEEP) {
+          /* subs has no timestamps — keep the entries at the end of the map
+             (JS objects keep insertion order, so these are the newest) */
+          keys.slice(0, keys.length - SUBS_KEEP).forEach(function (k) { delete subs[k]; });
+        }
+      }
+    } catch (e) { }
+  }
+
   function flush() {
     if (timer) { clearTimeout(timer); timer = null; }
     try {
+      prune();
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, JSON.stringify(data, null, 2));
       return true;

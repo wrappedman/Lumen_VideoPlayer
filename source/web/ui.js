@@ -25,6 +25,7 @@
     seekLeftN: $('#seekLeftN'), seekRightN: $('#seekRightN'),
     seekbar: $('#seekbar'), sbPlayed: $('#sbPlayed'), sbBuffered: $('#sbBuffered'),
     sbThumb: $('#sbThumb'), sbTip: $('#sbTip'), sbAB: $('#sbAB'), sbTick: $('#sbTick'),
+    sbMarks: $('#sbMarks'), sbThumbImg: $('#sbThumbImg'),
     tNow: $('#tNow'), tDur: $('#tDur'), tSpeed: $('#tSpeed'),
     btnPlay: $('#btnPlay'), centerPlay: $('#centerPlay'),
     volFill: $('#volFill'), volDot: $('#volDot'), volRail: $('#volRail'),
@@ -157,8 +158,25 @@
     }
     document.title = (it ? (it.title || it.name) + ' — ' : '') + 'Lumen';
     renderRate();
-    if (it && it.thumb) { /* nothing */ }
+    renderChapters();
     if (it && it.token && !it.thumb) loadThumb(it);
+  }
+  /* chapter markers on the seekbar track (nothing shown without chapters) */
+  function renderChapters() {
+    if (!el.sbMarks) return;
+    var ch = (P.chapters || []).slice(0, 64);
+    if (!ch.length || !P.dur) { el.sbMarks.innerHTML = ''; return; }
+    el.sbMarks.innerHTML = ch.map(function (c) {
+      return '<i style="left:' + (clamp(c.start / P.dur, 0, 1) * 100).toFixed(3) + '%"></i>';
+    }).join('');
+  }
+  /* hover a chapter marker → its title */
+  function chapterAt(p) {
+    var ch = P.chapters || [];
+    if (!ch.length || !P.dur) return null;
+    var t = p * P.dur;
+    for (var i = 0; i < ch.length; i++) if (t >= ch[i].start && (i === ch.length - 1 || t < ch[i].end)) { ch[i].index = i; return ch[i]; }
+    return null;
   }
   function loadThumb(it) {
     var url = L.Bridge.thumbUrl(it, 0);
@@ -267,24 +285,26 @@
       { label: 'Media info…', icon: 'info', disabled: !it.path, run: function () { Info.open(it); } }
     ], e.clientX, e.clientY, L.isTouchUI());
   }
-  function attachSubs(it, paths) {
-    if (!paths || !paths.length) return;
-    if (!it) {
-      L.Toast.show('Subtitle ready — open a video to see it.', { icon: 'subtitles' });
-      return;
+    function attachSubs(it, paths) {
+      if (!paths || !paths.length) return;
+      if (!it) {
+        L.Toast.show('Subtitle ready — open a video to see it.', { icon: 'subtitles' });
+        return;
+      }
+      it.subs = it.subs || [];
+      paths.forEach(function (p) { it.subs.push(p); });
+      Ev.emit('playlist');
+      if (it === P.item) {
+        P.subTracks = P.subTracks.concat(paths.map(function (p) {
+          return { id: 'ext:' + p, label: u.baseName(p), kind: 'external', path: p };
+        }));
+        Ev.emit('tracks');
+        L.Toast.show('Subtitle attached: ' + u.baseName(paths[0]), { icon: 'subtitles', ms: 2600 });
+      }
+      if (it.path) L.Bridge.call('remember_subs', it.path, paths);
     }
-    it.subs = it.subs || [];
-    paths.forEach(function (p) { it.subs.push(p); });
-    Ev.emit('playlist');
-    if (it === P.item) {
-      P.subTracks = P.subTracks.concat(paths.map(function (p) {
-        return { id: 'ext:' + p, label: u.baseName(p), kind: 'external', path: p };
-      }));
-      Ev.emit('tracks');
-      L.Toast.show('Subtitle attached: ' + u.baseName(paths[0]), { icon: 'subtitles', ms: 2600 });
-    }
-    if (it.path) L.Bridge.call('remember_subs', it.path, paths);
-  }
+    /* chapter marks were attached when the probe answered — paint them */
+    Ev.on('media', renderChapters);
 
   /* ------------------------------------------------------------------ tracks */
   function renderTracks() {
@@ -868,6 +888,38 @@
     Ev.emit('time');
     if (commit) P.seek(t);
   }
+  /* ---- hover preview: a frame from the host's thumbnail endpoint + the
+     chapter under the pointer. The thumbnail is cached by the server, so a
+     scrub costs almost nothing. */
+  var sbHoverT = null;
+  function sbShowPreview(e, frac) {
+    if (!el.sbThumbImg || !P.item || P.item.demo || P.item.path === undefined && !P.item.url) { sbHidePreview(); return; }
+    if (!P.item.token) { sbHidePreview(); return; }
+    var t = frac * (P.dur || 0);
+    if (!isFinite(t) || P.dur < 1) { sbHidePreview(); return; }
+    var it = P.item;
+    /* quantize to whole seconds so neighbouring moves reuse the same frame */
+    var at = Math.max(0, Math.floor(t));
+    var url = L.Bridge.thumbUrl(it, at);
+    if (!url) { sbHidePreview(); return; }
+    el.sbThumbImg.classList.add('show');
+    if (el.sbThumbImg._src !== url) {
+      el.sbThumbImg._src = url;
+      var img = $('img', el.sbThumbImg);
+      if (img) img.src = url;
+    }
+    var track = $('.track', el.seekbar).getBoundingClientRect();
+    var w = el.sbThumbImg.offsetWidth || 150;
+    var x = clamp(e.clientX - track.left, w / 2 + 6, track.width - w / 2 - 6);
+    el.sbThumbImg.style.left = x + 'px';
+    var timeEl = $('.sb-thumb-time', el.sbThumbImg);
+    if (timeEl) timeEl.textContent = fmt(t);
+    var chEl = $('.sb-thumb-ch', el.sbThumbImg);
+    if (chEl) { var ch = chapterAt(frac); chEl.textContent = ch ? (ch.title || ('Chapter ' + (ch.index + 1))) : ''; }
+  }
+  function sbHidePreview() {
+    if (el.sbThumbImg) el.sbThumbImg.classList.remove('show');
+  }
   function sbMoveTip(e) {
     var r = $('.track', el.seekbar).getBoundingClientRect();
     if (el.sbTip) {
@@ -875,6 +927,7 @@
       el.sbTip.style.left = x + 'px';
       el.sbTip.textContent = fmt(((e.clientX - r.left) / Math.max(1, r.width)) * (P.dur || 0));
     }
+    sbShowPreview(e, clamp((e.clientX - r.left) / Math.max(1, r.width), 0, 1));
   }
   if (el.seekbar) {
     el.seekbar.addEventListener('pointerdown', function (e) {
@@ -897,6 +950,7 @@
       e.preventDefault();
       P.nudge(e.deltaY < 0 ? S.seekstep : -S.seekstep);
     }, { passive: false });
+    el.seekbar.addEventListener('pointerleave', sbHidePreview);
   }
 
   /* ------------------------------------------------------------------ panels */
@@ -993,8 +1047,10 @@
     rotate: function () { P.applyVideoTransforms(); updatePanBounds(); },
     wheel: function () { }, smooth: function () { },
     hdr: function (v) { L.Bridge.call('set_hdr', !!v); P.applyVideoTransforms(); },
-    normalize: function () { L.Audio.ensure(); L.Audio.route(); renderVolume(); },
-    eq: function () { L.Audio.ensure(); L.Audio.route(); renderVolume(); },
+    normalize: function () { L.Audio.sync(); renderVolume(); },
+    eq: function () { L.Audio.sync(); renderVolume(); },
+    boost: function () { L.Audio.sync(); renderVolume(); },
+    sublang: function () { },
     subpreset: function (v) { el.subs.className = 'subs-layer subs-' + v; },
     subfont: function () { if (L.subStyleApply) L.subStyleApply(); },
     subshadow: function () { if (L.subStyleApply) L.subStyleApply(); },
@@ -1358,7 +1414,7 @@
   /* the playlist rows do not change when playback starts or stops — only the
      transport chrome does */
   Ev.on('playstate', function () { setPlayingChrome(P.playing); });
-  Ev.on('time', function () { renderTime(); if (S.repeat === 'one') { } });
+  Ev.on('time', function () { renderTime(); });
   Ev.on('buffered', renderBuffered);
   Ev.on('volume', renderVolume);
   Ev.on('rate', renderRate);
