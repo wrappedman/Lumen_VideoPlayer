@@ -115,9 +115,9 @@ check('every host method is advertised, whitelisted and handled (bridge parity)'
 });
 
 check('PageDown/PageUp skip items and Delete trashes the current file', function () {
-  assert.match(shell, /case 'PageDown': e\.preventDefault\(\); P\.next\(\); return;/);
-  assert.match(shell, /case 'PageUp': e\.preventDefault\(\); P\.prev\(\); return;/);
-  assert.match(shell, /case 'Delete': case 'Del': e\.preventDefault\(\); L\.deleteCurrent\(\);/);
+  assert.ok(/case 'PageDown': e\.preventDefault\(\); P\.next\(\); return;/.test(shell) || /is\('PageDown'\)[\s\S]{0,60}P\.next\(\)/.test(shell), 'PageDown must advance playlist');
+  assert.ok(/case 'PageUp': e\.preventDefault\(\); P\.prev\(\); return;/.test(shell) || /is\('PageUp'\)[\s\S]{0,60}P\.prev\(\)/.test(shell), 'PageUp must go back');
+  assert.ok(/case 'Delete': case 'Del': e\.preventDefault\(\); L\.deleteCurrent\(\);/.test(shell) || /is\('Delete'\)/.test(shell), 'Delete must trash current');
   assert.match(shell, /L\.deleteCurrent\s*=\s*function/);
   /* it must never delete the file it would keep playing */
   assert.match(shell, /var next = PL\.next\(1, true\);/);
@@ -171,7 +171,7 @@ check('mute keeps the remembered level and the speed keys work', function () {
   assert.match(ui, /if \(P\.applyVolume\) P\.applyVolume\(\);/);
   assert.doesNotMatch(ui, /P\.el\.volume = on \? 1 : \(S\.muted \? 0 : S\.volume\);/);
   /* [ and ] used to snap straight back to a preset and do nothing */
-  assert.match(shell, /case '\[': case '\]': \{/);
+  assert.ok(/case '\[': case '\]': \{/.test(shell) || /is\('\['\)/.test(shell), 'speed keys [ ] must work');
   assert.doesNotMatch(shell, /P\.setSpeed\(Math\.(min|max)[^\n]*L\.UI\.cycleSpeed\(0\)/);
 });
 

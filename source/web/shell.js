@@ -458,22 +458,22 @@
       ['Space / K', 'Play / Pause'],
       ['← / →', 'Seek back / forward (' + S.seekstep + ' s)'],
       ['Shift + ← / →', 'Seek 60 s'],
-      ['J', 'Previous item'],
+      ['J / N', 'Previous / next item'],
       ['Ctrl + ← / →', 'Previous / next item'],
-      ['PageDown / PageUp', 'Next / previous item'],
+      ['PageDown / PageUp', 'Next / previous item (wraps)'],
       ['Delete', 'Delete this file (Recycle Bin) and play the next'],
-      ['↑ / ↓', 'Volume ±5%'],
+      ['↑ / ↓', 'Volume ±5% (Shift ±10%)'],
       ['M', 'Mute'],
-      ['0 … 9', 'Jump to 0% … 90%'],
+      ['0 … 9', 'Jump to 0% … 90% (also Numpad)'],
       ['Home / End', 'Start / end of file'],
       [', / .', 'Frame step (while paused)'],
-      ['[ / ]', 'Speed down / up'],
-      ['\\', 'Reset speed'],
-      ['+ / −', 'Zoom in / out'],
-      ['Ctrl + 0', 'Reset zoom'],
-      ['Alt + arrows', 'Pan the picture'],
-      ['F / F11', 'Fullscreen'],
-      ['Esc', 'Close menu → panel → fullscreen'],
+      ['[ / ]', 'Speed down / up (0.25× step)'],
+      ['\\ (or |)', 'Reset speed to 1×'],
+      ['+ / − (or = / _)', 'Zoom in / out (Numpad +/− too)'],
+      ['Ctrl + 0', 'Reset zoom & pan (Ctrl+1 = 100%)'],
+      ['Alt + arrows', 'Pan the picture (when zoomed)'],
+      ['F / F11', 'Fullscreen (Esc exits)'],
+      ['Esc', 'Close menu → panel → zoom → fullscreen → window'],
       ['W', 'Mini player'],
       ['T', 'Always on top'],
       ['A', 'Cycle aspect ratio'],
@@ -489,6 +489,7 @@
       ['Ctrl + Shift + O', 'Open folder'],
       ['U', 'Open URL / stream'],
       ['P / I', 'Playlist / settings panel'],
+      ['F1', 'This help'],
       ['Mouse wheel', 'Volume · seek · zoom (see Settings)'],
       ['Seekbar hover', 'Preview thumbnail + chapter title'],
       ['Double-click sides', 'Seek ± ' + S.seekstep + ' s'],
@@ -870,28 +871,98 @@
     L.Zoom.y = clamp(L.Zoom.y + dy, -b.y, b.y);
     L.Zoom.to(L.Zoom.z, L.Zoom.x, L.Zoom.y);
   }
+  /* physical layout helper: map e.code to ascii regardless of Persian/Arabic layout */
+  function physChar(code, shift) {
+    if (!code) return '';
+    if (code.indexOf('Key') === 0) return code.slice(3).toLowerCase();
+    if (code.indexOf('Digit') === 0) return code.slice(5);
+    if (code === 'BracketLeft') return shift ? '{' : '[';
+    if (code === 'BracketRight') return shift ? '}' : ']';
+    if (code === 'Backslash') return shift ? '|' : '\\';
+    if (code === 'Minus') return shift ? '_' : '-';
+    if (code === 'Equal') return shift ? '+' : '=';
+    if (code === 'Comma') return shift ? '<' : ',';
+    if (code === 'Period') return shift ? '>' : '.';
+    if (code === 'Slash') return shift ? '?' : '/';
+    if (code === 'Semicolon') return shift ? ':' : ';';
+    if (code === 'Quote') return shift ? '"' : "'";
+    if (code === 'Backquote') return shift ? '~' : '`';
+    if (code === 'Space') return ' ';
+    if (code === 'Numpad0') return '0';
+    if (code === 'Numpad1') return '1';
+    if (code === 'Numpad2') return '2';
+    if (code === 'Numpad3') return '3';
+    if (code === 'Numpad4') return '4';
+    if (code === 'Numpad5') return '5';
+    if (code === 'Numpad6') return '6';
+    if (code === 'Numpad7') return '7';
+    if (code === 'Numpad8') return '8';
+    if (code === 'Numpad9') return '9';
+    if (code === 'NumpadAdd') return '+';
+    if (code === 'NumpadSubtract') return '-';
+    if (code === 'NumpadMultiply') return '*';
+    if (code === 'NumpadDivide') return '/';
+    if (code === 'NumpadDecimal') return '.';
+    if (code === 'NumpadEnter') return 'Enter';
+    return '';
+  }
   window.addEventListener('keydown', function (e) {
     if (isTyping(e)) { if (e.key === 'Escape') e.target.blur(); return; }
     var k = e.key;
+    var code = e.code || '';
     var ctrl = e.ctrlKey || e.metaKey;
     var alt = e.altKey;
     var shift = e.shiftKey;
 
+    var phys = physChar(code, shift);
+    var kLower = k ? String(k).toLowerCase() : '';
+    var physLower = phys ? String(phys).toLowerCase() : '';
+    /* effective single-char for layout independence: if k is non-ascii (Persian) use phys */
+    var isAsciiSingle = k && k.length === 1 && /^[\x20-\x7E]$/.test(k);
+    var eff = k;
+    var effLower = kLower;
+    if (phys && phys.length === 1) {
+      if (!isAsciiSingle) { eff = phys; effLower = physLower; }
+      else if (ctrl && physLower && kLower !== physLower && /^[a-z0-9]$/.test(physLower)) {
+        /* Ctrl+O in Persian gives k='خ' (non-ascii) already handled, but also check ascii mismatch */
+        eff = phys; effLower = physLower;
+      }
+    }
+    function is(ch) {
+      if (!ch) return false;
+      if (k === ch) return true;
+      if (eff === ch) return true;
+      if (phys === ch) return true;
+      if (kLower === String(ch).toLowerCase()) return true;
+      if (effLower === String(ch).toLowerCase()) return true;
+      if (physLower === String(ch).toLowerCase()) return true;
+      if (code === ch) return true;
+      return false;
+    }
+    function isAny(arr) { for (var _i = 0; _i < arr.length; _i++) if (is(arr[_i])) return true; return false; }
+    function numChar() {
+      if (shift) return null;
+      if (k && /^[0-9]$/.test(k)) return k;
+      if (phys && /^[0-9]$/.test(phys)) return phys;
+      if (eff && /^[0-9]$/.test(eff)) return eff;
+      return null;
+    }
+
     /* menu navigation takes priority */
     if (L.Menu.isOpen()) {
       var items = L.Menu.items();
-      if (k === 'Escape') { e.preventDefault(); L.Menu.close(); return; }
-      if (k === 'ArrowDown' || k === 'ArrowUp') {
+      if (is('Escape')) { e.preventDefault(); L.Menu.close(); return; }
+      if (is('ArrowDown') || is('ArrowUp')) {
         e.preventDefault();
         var f = L.Menu.focus;
-        f = clamp(f + (k === 'ArrowDown' ? 1 : -1), 0, items.length - 1);
+        f = clamp(f + (is('ArrowDown') ? 1 : -1), 0, items.length - 1);
         L.Menu.focus = f;
         L.Menu.paint();
         items[f] && items[f].focus();
         return;
       }
-      if (k === 'ArrowLeft') { e.preventDefault(); L.Menu.back(); return; }
-      if (k === 'ArrowRight' || k === 'Enter') {
+      if (is('ArrowLeft')) { e.preventDefault(); L.Menu.back(); return; }
+      if (is('ArrowRight') || is('Enter')) {
         e.preventDefault();
         var cur = items[clamp(L.Menu.focus, 0, items.length - 1)];
         if (cur) cur.click();
@@ -900,120 +971,129 @@
       return;
     }
     if (L.Modal.isOpen()) {
-      if (k === 'Escape') { e.preventDefault(); L.Modal.close(); }
+      if (is('Escape')) { e.preventDefault(); L.Modal.close(); }
       return;
     }
 
-    switch (k) {
-      case ' ': case 'k': case 'K': e.preventDefault(); P.toggle(); L.UI.wake(); return;
-      case 'MediaPlayPause': P.toggle(); return;
-      case 'MediaTrackNext': P.next(); return;
-      case 'MediaTrackPrevious': P.prev(); return;
-      case 'ArrowLeft':
-        e.preventDefault();
-        if (alt) panBy(40, 0);
-        else if (ctrl) P.prev();
-        else if (shift) P.nudge(-60);
-        else L.UI.seekFx('left', S.seekstep);
-        return;
-      case 'ArrowRight':
-        e.preventDefault();
-        if (alt) panBy(-40, 0);
-        else if (ctrl) P.next();
-        else if (shift) P.nudge(60);
-        else L.UI.seekFx('right', S.seekstep);
-        return;
-      case 'ArrowUp':
-        e.preventDefault();
-        if (alt) panBy(0, 40); else L.setVolume((S.muted ? 0 : S.volume) + (shift ? 0.1 : 0.05));
-        return;
-      case 'ArrowDown':
-        e.preventDefault();
-        if (alt) panBy(0, -40); else L.setVolume((S.muted ? 0 : S.volume) - (shift ? 0.1 : 0.05));
-        return;
-      case 'm': case 'M': L.toggleMute(); return;
-      case 'f': case 'F': case 'F11': e.preventDefault(); L.toggleFullscreen(); return;
-      case 'w': case 'W': L.setMini(el.body.dataset.mode !== 'mini'); return;
-      case 't': case 'T': L.setSetting('ontop', !S.ontop); B.call('set_always_on_top', !S.ontop); L.UI.syncPins();
-        L.Toast.show('Always on top ' + (!S.ontop ? 'on' : 'off'), { icon: 'pin', ms: 1400 }); return;
-      case 'p': case 'P': e.preventDefault(); L.togglePanel('playlist'); return;
-      case 'i': case 'I': e.preventDefault(); L.togglePanel('settings'); return;
-      case 'j': case 'J': P.prev(); return;
-      case 'l': case 'L': L.cycleRepeat(); return;
-      case 'v': case 'V': L.UI.cycleSubs(1); return;
-      case 'c': case 'C': L.pickSubtitles(function (p) { L.UI.attachSubs(P.item, p); }); return;
-      case 'b': case 'B': L.UI.cycleAudio(); return;
-      case 'y': case 'Y': Info.open(P.item); return;
-      /* Boost (volume > 100%) — a quick gain toggle for quiet sources */
-      case 'g': case 'G': L.setSetting('boost', !S.boost); L.Audio.sync(); L.UI.syncWidgets();
-        L.Toast.show('Volume boost ' + (S.boost ? 'on (up to 200%)' : 'off'), { icon: 'volume-high', ms: 1500 }); return;
-      case 'u': case 'U': L.openUrlDialog(); return;
-      case 'x': case 'X':
-        if (!P.ab) P.abSet('a');
-        else if (P.ab && P.ab.a != null && P.ab.b == null) P.abSet('b');
-        else P.abSet(null);
-        Ev.emit('ab');
-        L.Toast.show(!P.ab ? 'A-B loop cleared' : (P.ab.b == null ? 'A = ' + fmt(P.ab.a) : 'Looping ' + fmt(P.ab.a) + ' → ' + fmt(P.ab.b)), { icon: 'ab-loop', ms: 1800 });
-        return;
-      case 'a': case 'A': {
-        var list = ['auto', 'cover', '16:9', '4:3', '21:9'];
-        var i = list.indexOf(S.aspect);
-        L.setSetting('aspect', list[(i + 1) % list.length]);
-        P.applyVideoTransforms(); L.updatePanBounds(); L.UI.syncWidgets();
-        L.Toast.show('Aspect: ' + S.aspect, { icon: 'aspect', ms: 1500 });
-        return;
-      }
-      case 'r': case 'R': {
-        var rot = ((S.rotate || 0) + 90) % 360;
-        L.setSetting('rotate', rot);
-        P.applyVideoTransforms(); L.updatePanBounds(); L.UI.syncWidgets();
-        L.Toast.show('Rotate ' + rot + '°', { icon: 'rotate', ms: 1400 });
-        return;
-      }
-      case ',': case '<': frameStep(-1); return;
-      case '.': case '>': frameStep(1); return;
-      /* NB: no cycleSpeed() here — it snapped the freshly set 1.25× straight
-         back to the nearest preset (1×), so [ and ] did nothing at all */
-      case '[': case ']': {
-        var step = (k === ']') ? 0.25 : -0.25;
-        P.setSpeed(clamp(Math.round((S.speed + step) * 4) / 4, 0.25, 3));
-        L.Toast.show('Speed ' + S.speed + '×', { icon: 'speed', ms: 1200 });
-        return;
-      }
-      case '\\': P.setSpeed(1); L.Toast.show('Speed 1×', { icon: 'speed', ms: 1200 }); return;
-      case '+': case '=': L.Zoom.zoomAbout(L.Zoom.z * 1.25); return;
-      case '-': case '_': L.Zoom.zoomAbout(L.Zoom.z / 1.25); return;
-      case 'Home': P.seek(0); return;
-      case 'End': P.seek(P.dur || 0); return;
-      /* PageDown / PageUp = jump through the playlist (wraps around) — a panel
-         or control keeps its own scrolling (inScroller guard, tests stay green) */
-      case 'PageDown': e.preventDefault(); P.next(); return;
-      case 'PageUp': e.preventDefault(); P.prev(); return;
-      /* Delete = trash the playing file and immediately continue with the next */
-      case 'Delete': case 'Del': e.preventDefault(); L.deleteCurrent(); return;
-      case 'Escape': {
-        if (L.Menu.isOpen()) { L.Menu.close(); return; }
-        if (L.Modal.isOpen()) { L.Modal.close(); return; }
-        if (L.anyPanelOpen()) { L.closePanels(); return; }
-        if (L.Zoom.z > 1.001) { L.Zoom.reset(); return; }
-        /* leaving fullscreen via Esc must not also unmaximize the window —
-           the unmaximize event arrives on its own from the OS */
-        if (el.body.dataset.mode === 'full') { L.toggleFullscreen(false); L.UI.setMode('window'); return; }
-        if (el.body.dataset.mode === 'max') { L.UI.setMode('window'); B.call('window_action', 'restore'); return; }
-        return;
-      }
-      case 'F1': e.preventDefault(); L.showShortcuts(); return;
-      case 'o': case 'O':
-        if (!ctrl) return;
-        e.preventDefault();
-        L.openFiles(shift);
-        return;
-      default: break;
+    /* ---- transport & navigation (layout-independent) ---- */
+    if (is(' ') || is('k')) { e.preventDefault(); P.toggle(); L.UI.wake(); return; }
+    if (is('MediaPlayPause')) { P.toggle(); return; }
+    if (is('MediaTrackNext')) { P.next(); return; }
+    if (is('MediaTrackPrevious')) { P.prev(); return; }
+
+    if (is('ArrowLeft')) {
+      e.preventDefault();
+      if (alt) panBy(40, 0);
+      else if (ctrl) P.prev();
+      else if (shift) P.nudge(-60);
+      else L.UI.seekFx('left', S.seekstep);
+      return;
     }
-    if (ctrl && (k === '0')) { e.preventDefault(); L.Zoom.reset(); return; }
-    if (ctrl && (k === '1')) { e.preventDefault(); L.Zoom.to(1, 0, 0); return; }
-    if (/^[0-9]$/.test(k)) {
-      var pct = parseInt(k, 10) / 10;
+    if (is('ArrowRight')) {
+      e.preventDefault();
+      if (alt) panBy(-40, 0);
+      else if (ctrl) P.next();
+      else if (shift) P.nudge(60);
+      else L.UI.seekFx('right', S.seekstep);
+      return;
+    }
+    if (is('ArrowUp')) {
+      e.preventDefault();
+      if (alt) panBy(0, 40); else L.setVolume((S.muted ? 0 : S.volume) + (shift ? 0.1 : 0.05));
+      return;
+    }
+    if (is('ArrowDown')) {
+      e.preventDefault();
+      if (alt) panBy(0, -40); else L.setVolume((S.muted ? 0 : S.volume) - (shift ? 0.1 : 0.05));
+      return;
+    }
+
+    if (!ctrl && !alt && is('m')) { L.toggleMute(); return; }
+    if (!ctrl && !alt && (is('f') || is('F11'))) { e.preventDefault(); L.toggleFullscreen(); return; }
+    if (!ctrl && !alt && is('w')) { L.setMini(el.body.dataset.mode !== 'mini'); return; }
+    if (!ctrl && !alt && is('t')) { L.setSetting('ontop', !S.ontop); B.call('set_always_on_top', !S.ontop); L.UI.syncPins();
+      L.Toast.show('Always on top ' + (!S.ontop ? 'on' : 'off'), { icon: 'pin', ms: 1400 }); return; }
+    if (!ctrl && !alt && is('p')) { e.preventDefault(); L.togglePanel('playlist'); return; }
+    if (!ctrl && !alt && is('i')) { e.preventDefault(); L.togglePanel('settings'); return; }
+    if (!ctrl && !alt && is('j')) { P.prev(); return; }
+    if (!ctrl && !alt && is('n')) { P.next(); return; }
+    if (!ctrl && !alt && is('l')) { L.cycleRepeat(); return; }
+    if (!ctrl && !alt && is('v')) { L.UI.cycleSubs(1); return; }
+    if (!ctrl && !alt && is('c')) { L.pickSubtitles(function (p) { L.UI.attachSubs(P.item, p); }); return; }
+    if (!ctrl && !alt && is('b')) { L.UI.cycleAudio(); return; }
+    if (!ctrl && !alt && is('y')) { Info.open(P.item); return; }
+    if (!ctrl && !alt && is('g')) { L.setSetting('boost', !S.boost); L.Audio.sync(); L.UI.syncWidgets();
+      L.Toast.show('Volume boost ' + (S.boost ? 'on (up to 200%)' : 'off'), { icon: 'volume-high', ms: 1500 }); return; }
+    if (!ctrl && !alt && is('u')) { L.openUrlDialog(); return; }
+    if (!ctrl && !alt && is('x')) {
+      if (!P.ab) P.abSet('a');
+      else if (P.ab && P.ab.a != null && P.ab.b == null) P.abSet('b');
+      else P.abSet(null);
+      Ev.emit('ab');
+      L.Toast.show(!P.ab ? 'A-B loop cleared' : (P.ab.b == null ? 'A = ' + fmt(P.ab.a) : 'Looping ' + fmt(P.ab.a) + ' → ' + fmt(P.ab.b)), { icon: 'ab-loop', ms: 1800 });
+      return;
+    }
+    if (!ctrl && !alt && is('a')) {
+      var list = ['auto', 'cover', '16:9', '4:3', '21:9'];
+      var i = list.indexOf(S.aspect);
+      L.setSetting('aspect', list[(i + 1) % list.length]);
+      P.applyVideoTransforms(); L.updatePanBounds(); L.UI.syncWidgets();
+      L.Toast.show('Aspect: ' + S.aspect, { icon: 'aspect', ms: 1500 });
+      return;
+    }
+    if (!ctrl && !alt && is('r')) {
+      var rot = ((S.rotate || 0) + 90) % 360;
+      L.setSetting('rotate', rot);
+      P.applyVideoTransforms(); L.updatePanBounds(); L.UI.syncWidgets();
+      L.Toast.show('Rotate ' + rot + '°', { icon: 'rotate', ms: 1400 });
+      return;
+    }
+    if (!ctrl && !alt && (is(',') || is('<'))) { frameStep(-1); return; }
+    if (!ctrl && !alt && (is('.') || is('>'))) { frameStep(1); return; }
+    if (!ctrl && !alt && (is('[') || is('{'))) {
+      P.setSpeed(clamp(Math.round((S.speed - 0.25) * 4) / 4, 0.25, 3));
+      L.Toast.show('Speed ' + S.speed + '×', { icon: 'speed', ms: 1200 });
+      return;
+    }
+    if (!ctrl && !alt && (is(']') || is('}'))) {
+      P.setSpeed(clamp(Math.round((S.speed + 0.25) * 4) / 4, 0.25, 3));
+      L.Toast.show('Speed ' + S.speed + '×', { icon: 'speed', ms: 1200 });
+      return;
+    }
+    if (!ctrl && !alt && is('\\')) { P.setSpeed(1); L.Toast.show('Speed 1×', { icon: 'speed', ms: 1200 }); return; }
+    if (!ctrl && !alt && is('|')) { P.setSpeed(1); L.Toast.show('Speed 1×', { icon: 'speed', ms: 1200 }); return; }
+    if (!ctrl && !alt && (is('+') || is('='))) { L.Zoom.zoomAbout(L.Zoom.z * 1.25); return; }
+    if (!ctrl && !alt && (is('-') || is('_'))) { L.Zoom.zoomAbout(L.Zoom.z / 1.25); return; }
+    /* Numpad zoom */
+    if (!ctrl && !alt && (code === 'NumpadAdd' || (is('+') && code.indexOf('Numpad') === 0))) { L.Zoom.zoomAbout(L.Zoom.z * 1.25); return; }
+    if (!ctrl && !alt && (code === 'NumpadSubtract' || (is('-') && code.indexOf('Numpad') === 0))) { L.Zoom.zoomAbout(L.Zoom.z / 1.25); return; }
+
+    if (is('Home')) { P.seek(0); return; }
+    if (is('End')) { P.seek(P.dur || 0); return; }
+    if (is('PageDown')) { e.preventDefault(); P.next(); return; }
+    if (is('PageUp')) { e.preventDefault(); P.prev(); return; }
+    if (is('Delete') || is('Del')) { e.preventDefault(); L.deleteCurrent(); return; }
+    if (is('Escape')) {
+      if (L.Menu.isOpen()) { L.Menu.close(); return; }
+      if (L.Modal.isOpen()) { L.Modal.close(); return; }
+      if (L.anyPanelOpen()) { L.closePanels(); return; }
+      if (L.Zoom.z > 1.001) { L.Zoom.reset(); return; }
+      if (el.body.dataset.mode === 'full') { L.toggleFullscreen(false); L.UI.setMode('window'); return; }
+      if (el.body.dataset.mode === 'max') { L.UI.setMode('window'); B.call('window_action', 'restore'); return; }
+      return;
+    }
+    if (is('F1')) { e.preventDefault(); L.showShortcuts(); return; }
+    if (ctrl && is('o')) {
+      e.preventDefault();
+      L.openFiles(shift);
+      return;
+    }
+    if (ctrl && is('0')) { e.preventDefault(); L.Zoom.reset(); return; }
+    if (ctrl && is('1')) { e.preventDefault(); L.Zoom.to(1, 0, 0); return; }
+    if (ctrl && (is('9') || is('8') || is('7') || is('6') || is('5') || is('4') || is('3') || is('2'))) { return; }
+    var nc = numChar();
+    if (nc !== null && !ctrl && !alt) {
+      var pct = parseInt(nc, 10) / 10;
       P.seek((P.dur || 0) * pct);
       return;
     }
