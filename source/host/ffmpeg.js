@@ -55,15 +55,51 @@ function createFfmpeg(opts) {
   const isWin = process.platform === 'win32';
   const exe = isWin ? '.exe' : '';
 
-  function testBin(file) {
-    try {
-      const r = spawnSync(file, ['-hide_banner', '-version'], { timeout: 8000, windowsHide: true });
-      return r.status === 0 || !!(r.stdout && r.stdout.length);
-    } catch (e) { return false; }
+  /* ---------------------------------------------------------------- capture
+     Run a child process and collect its output asynchronously. Detection used
+     to be a chain of spawnSync() calls (up to four `reg query` runs plus a
+     `-version` probe per candidate) executed on the main thread *before* the
+     window existed — every millisecond there was a millisecond of empty
+     desktop. The same work now runs in the background while Chromium boots. */
+  function capture(cmd, args, timeoutMs) {
+    return new Promise(function (resolve) {
+      let child;
+      try { child = spawn(cmd, args, { windowsHide: true }); }
+      catch (e) { resolve({ failed: true, status: -1, stdout: '', stderr: String(e && e.message) }); return; }
+      let out = '', err = '', settled = false, timer = null;
+      const finish = function (res) {
+        if (settled) return;
+        settled = true;
+        if (timer) { clearTimeout(timer); timer = null; }
+        resolve(res);
+      };
+      if (child.stdout) { child.stdout.setEncoding('utf8'); child.stdout.on('data', function (d) { out += d; }); }
+      if (child.stderr) { child.stderr.setEncoding('utf8'); child.stderr.on('data', function (d) { err += d; }); }
+      if (timeoutMs) {
+        timer = setTimeout(function () {
+          try { child.kill('SIGKILL'); } catch (e) { }
+          finish({ failed: true, timeout: true, status: -1, stdout: out, stderr: err });
+        }, timeoutMs);
+        if (timer.unref) { try { timer.unref(); } catch (e) { } }
+      }
+      child.on('error', function (e) { finish({ failed: true, status: -1, stdout: out, stderr: String(e && e.message) }); });
+      child.on('close', function (code) { finish({ status: code, stdout: out, stderr: err }); });
+    });
   }
 
-  function testBinSafe(file) {
-    try { return util.isFile(file) && testBin(file); } catch (e) { return false; }
+  function versionFrom(out) {
+    const line = String(out || '').split('\n')[0] || '';
+    return line.replace('ffmpeg version ', '').split(' ')[0] || '';
+  }
+
+  /* one candidate binary: does it answer, and which version is it?
+     Resolves to { file, version } or null — never blocks. */
+  function testBin(file) {
+    if (!util.isFile(file)) return Promise.resolve(null);
+    return capture(file, ['-hide_banner', '-version'], 8000).then(function (r) {
+      if (!(r.status === 0 || !!(r.stdout && r.stdout.length))) return null;
+      return { file: file, version: versionFrom(r.stdout) };
+    });
   }
 
   /* Places a *manual* install usually lands in on Windows. The app may have
@@ -112,87 +148,126 @@ function createFfmpeg(opts) {
 
   /* PATH of the *registry* — a freshly added folder is not in our own env yet */
   function registryPathDirs() {
-    if (!isWin) return [];
-    const out = [];
-    [['HKCU\\Environment', 'Path'], ['HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'Path']]
-      .forEach(function (pair) {
-        try {
-          const r = spawnSync('reg', ['query', pair[0], '/v', pair[1]], { timeout: 6000, windowsHide: true });
-          const txt = String(r.stdout || '');
-          const m = /REG_(?:EXPAND_)?SZ\s+(.+)/.exec(txt);
-          if (!m) return;
-          String(m[1]).split(';').forEach(function (p) {
-            const dir = p.trim().replace(/%([^%]+)%/g, function (_, n) { return process.env[n] || ''; });
-            if (dir) out.push(dir);
-          });
-        } catch (e) { }
+    if (!isWin) return Promise.resolve([]);
+    const pairs = [['HKCU\\Environment', 'Path'],
+      ['HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'Path']];
+    return Promise.all(pairs.map(function (pair) {
+      return capture('reg', ['query', pair[0], '/v', pair[1]], 6000).then(function (r) {
+        const m = /REG_(?:EXPAND_)?SZ\s+(.+)/.exec(String(r.stdout || ''));
+        if (!m) return [];
+        const out = [];
+        String(m[1]).split(';').forEach(function (p) {
+          const dir = p.trim().replace(/%([^%]+)%/g, function (_, n) { return process.env[n] || ''; });
+          if (dir) out.push(dir);
+        });
+        return out;
       });
-    return out;
+    })).then(function (lists) {
+      return lists.reduce(function (a, b) { return a.concat(b); }, []);
+    });
   }
 
-  function findBin(name) {
+  /* every place worth looking, in the historical order, without the registry:
+     the answer is a plain array of full paths, so probing them costs one
+     isFile() each instead of a process spawn per entry */
+  function localCandidates(name) {
+    const out = [];
     /* 1) explicit environment override (file or folder) */
     const envVal = process.env.LUMEN_FFMPEG || process.env.FFMPEG_PATH;
     if (envVal) {
-      if (util.isFile(envVal) && name === 'ffmpeg') return envVal;
-      if (util.isDir(envVal)) {
-        const cand = path.join(envVal, name + exe);
-        if (testBinSafe(cand)) return cand;
-      }
+      if (name === 'ffmpeg' && util.isFile(envVal)) out.push(envVal);
+      if (util.isDir(envVal)) out.push(path.join(envVal, name + exe));
     }
     /* 2) next to the executable / in a tools folder / user data */
-    for (let i = 0; i < dirs.length; i++) {
-      const cands = [
-        path.join(dirs[i], name + exe),
-        path.join(dirs[i], 'tools', name + exe),
-        path.join(dirs[i], 'ffmpeg', 'bin', name + exe),
-        path.join(dirs[i], 'ffmpeg', name + exe)
-      ];
-      for (let k = 0; k < cands.length; k++) {
-        if (testBinSafe(cands[k])) return cands[k];
-      }
-    }
+    dirs.forEach(function (dir) {
+      out.push(path.join(dir, name + exe));
+      out.push(path.join(dir, 'tools', name + exe));
+      out.push(path.join(dir, 'ffmpeg', 'bin', name + exe));
+      out.push(path.join(dir, 'ffmpeg', name + exe));
+    });
     /* 3) the well-known Windows install folders (winget / scoop / choco / …) */
-    const extras = extraWinDirs().concat(registryPathDirs());
-    for (let i = 0; i < extras.length; i++) {
-      const cand = path.join(extras[i], name + exe);
-      if (testBinSafe(cand)) return cand;
-    }
-    /* 4) this process' PATH */
-    const r = spawnSync(name + exe, ['-hide_banner', '-version'], { timeout: 8000, windowsHide: true });
-    if (r && (r.status === 0 || (r.stdout && String(r.stdout).indexOf('ffmpeg version') >= 0))) return name + exe;
-    return '';
+    extraWinDirs().forEach(function (dir) { out.push(path.join(dir, name + exe)); });
+    return out;
+  }
+
+  /* first candidate that really runs (sequentially: the first hit wins, and a
+     bundled engine is normally the very first entry) */
+  function firstWorking(list) {
+    const next = function (i) {
+      if (i >= list.length) return Promise.resolve(null);
+      return testBin(list[i]).then(function (hit) { return hit || next(i + 1); });
+    };
+    return next(0);
+  }
+
+  function findBin(name) {
+    return firstWorking(localCandidates(name)).then(function (hit) {
+      if (hit) return hit;
+      return registryPathDirs().then(function (extraDirs) {
+        return firstWorking(extraDirs.map(function (d) { return path.join(d, name + exe); }));
+      });
+    }).then(function (hit) {
+      if (hit) return hit;
+      /* 4) this process' PATH */
+      return capture(name + exe, ['-hide_banner', '-version'], 8000).then(function (r) {
+        if (r && (r.status === 0 || String(r.stdout || '').indexOf('ffmpeg version') >= 0)) {
+          return { file: name + exe, version: versionFrom(r.stdout) };
+        }
+        return null;
+      });
+    });
   }
 
   /* resolved lazily so an optional advanced override or a bundled-engine
      rescan is picked up without restarting Lumen */
-  let ffmpegPath = findBin('ffmpeg');
-  let ffprobePath = findBin('ffprobe');
+  let ffmpegPath = '';
+  let ffprobePath = '';
   let versionCache = '';
-  const probeCache = new Map();      /* path -> { key, info } */
+  let probeCache = new Map();        /* path -> { key, info } */
   const PROBE_CACHE_MAX = 64;        /* keep metadata for a folder, not the world */
   let filtersCache = null;
+  let filtersLoading = null;
+  let detection = null;              /* pending / finished detection promise */
+
+  /* Finds the engine in the background. The window, the local server and the
+     renderer all start while this runs; anything that really needs the answer
+     awaits whenReady() instead of blocking the whole launch. */
+  function detect() {
+    if (detection) return detection;
+    detection = Promise.all([findBin('ffmpeg'), findBin('ffprobe')]).then(function (found) {
+      const bin = found[0];
+      const probe = found[1];
+      ffmpegPath = (bin && bin.file) || '';
+      ffprobePath = (probe && probe.file) || '';
+      versionCache = (bin && bin.version) || '';
+      warmFiltersLater();
+      return { available: !!ffmpegPath, path: ffmpegPath };
+    }).catch(function () {
+      return { available: !!ffmpegPath, path: ffmpegPath };
+    });
+    return detection;
+  }
+
+  function whenReady() { return detect(); }
 
   function rescan() {
     const before = ffmpegPath;
-    ffmpegPath = findBin('ffmpeg');
-    ffprobePath = findBin('ffprobe');
+    /* the previous answer stays in place while the new scan runs: a stream that
+       is already playing must not lose its engine for the ~100 ms a rescan
+       takes */
+    detection = null;
     filtersCache = null;
+    filtersLoading = null;
     versionCache = '';
-    probeCache.clear();
-    return { available: !!ffmpegPath, changed: ffmpegPath !== before, path: ffmpegPath };
+    probeCache = new Map();
+    return detect().then(function () {
+      return { available: !!ffmpegPath, changed: ffmpegPath !== before, path: ffmpegPath };
+    });
   }
 
-  function version() {
-    if (!ffmpegPath) return '';
-    if (versionCache) return versionCache;
-    try {
-      const r = spawnSync(ffmpegPath, ['-hide_banner', '-version'], { timeout: 8000, windowsHide: true });
-      const m = String(r.stdout || '').split('\n')[0];
-      versionCache = (m || '').replace('ffmpeg version ', '').split(' ')[0] || 'ready';
-    } catch (e) { versionCache = 'ready'; }
-    return versionCache;
-  }
+  /* the version is parsed during detection — asking for it again would mean
+     yet another process spawn on the UI thread */
+  function version() { return versionCache || ''; }
 
   function available() { return !!ffmpegPath; }
   function canProbe() { return !!ffprobePath; }
@@ -202,16 +277,48 @@ function createFfmpeg(opts) {
     return 'ffmpeg ' + (version() || 'ready') + (ffprobePath ? ' + ffprobe' : '');
   }
 
+  /* The filter list is fetched once, off the UI thread, shortly after the
+     window is up. hasFilter() still answers synchronously the first time it is
+     asked (an HDR file opened in the first second of the session) — that is the
+     pre-existing behaviour — but the answer is cached so it happens once. */
+  function loadFilters() {
+    if (filtersCache) return Promise.resolve(filtersCache);
+    if (filtersLoading) return filtersLoading;
+    if (!ffmpegPath) return Promise.resolve(null);
+    filtersLoading = capture(ffmpegPath, ['-hide_banner', '-filters'], 15000).then(function (r) {
+      const set = new Set();
+      String(r.stdout || '').split('\n').forEach(function (line) {
+        const m = line.match(/^\s*[TSC.]{3}\s+([a-z0-9_]+)/i);
+        if (m) set.add(m[1]);
+      });
+      filtersCache = set;
+      filtersLoading = null;
+      return set;
+    }).catch(function () { filtersLoading = null; return null; });
+    return filtersLoading;
+  }
+
+  function warmFiltersLater() {
+    if (!ffmpegPath || filtersCache || filtersLoading) return;
+    try {
+      const t = setTimeout(loadFilters, 1200);
+      if (t.unref) t.unref();
+    } catch (e) { }
+  }
+
   function hasFilter(name) {
     if (!filtersCache) {
-      filtersCache = new Set();
+      if (!ffmpegPath) { filtersCache = new Set(); return false; }
+      warmFiltersLater();
+      const set = new Set();
       try {
         const r = spawnSync(ffmpegPath, ['-hide_banner', '-filters'], { timeout: 15000, windowsHide: true });
         String(r.stdout || '').split('\n').forEach(function (line) {
           const m = line.match(/^\s*[TSC.]{3}\s+([a-z0-9_]+)/i);
-          if (m) filtersCache.add(m[1]);
+          if (m) set.add(m[1]);
         });
       } catch (e) { }
+      if (!filtersCache) filtersCache = set;
     }
     return filtersCache.has(name);
   }
@@ -394,8 +501,14 @@ function createFfmpeg(opts) {
 
   /* cached probe — the file's size + mtime form the cache key */
   function probe(file) {
+    if (!util.isFile(file) || !detection) return Promise.resolve(null);
+    /* a file dropped in the first second of the session must not be probed
+       with a half-finished detection (that used to mean "no metadata") */
+    return detect().then(function () { return probeNow(file); });
+  }
+
+  function probeNow(file) {
     return new Promise(function (resolve) {
-      if (!util.isFile(file)) { resolve(null); return; }
       let key = '';
       try { const st = fs.statSync(file); key = st.size + ':' + st.mtimeMs; } catch (e) { }
       const hit = probeCache.get(file);
@@ -772,11 +885,15 @@ function createFfmpeg(opts) {
     return spawn(ffmpegPath, args, { windowsHide: true });
   }
 
+  /* kick the (now asynchronous) engine detection off right away: it runs while
+     the window is being built instead of holding the launch hostage */
+  try { detect(); } catch (e) { }
+
   return {
     get path() { return ffmpegPath; },
     get probePath() { return ffprobePath; },
     searchDirs: function () { return dirs.slice(0); },
-    available, canProbe, describe, hasFilter, rescan, version,
+    available, canProbe, describe, hasFilter, rescan, version, whenReady,
     probe, probeSync, probeUrl, thumbnail, sidecars, extractSubtitle, srtToVtt,
     plan, transcodeArgs, spawnStream, run
   };

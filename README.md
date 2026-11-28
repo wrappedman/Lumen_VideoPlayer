@@ -37,6 +37,7 @@
 - 🖱️ **تعامل دسکتاپ:** منوی راست‌کلیک، میان‌برها و دیالوگ Open URL با Cut/Copy/Paste.
 - ⌨️ **میان‌برهای تازه:** `PageDown` / `PageUp` رفتن به ویدیوی بعدی/قبلی (با چرخش دور فهرست) و `Delete` انتقال فایل در حال پخش به **Recycle Bin** و پخش فوری ویدیوی بعدی. اگر فهرست فقط یک آیتم داشته باشد، فایل حذف نمی‌شود.
 - ⚡ **سبک و سریع:** رسم تجمیعی فهرست پخش، بدون ffprobe برای هر فایل هنگام شروع، حذف کامل لایه‌های شیشه‌ای نامرئی از رندر، حالت کم‌مصرف واقعی، و رفع باگ مسیر FFmpeg (`transcode_start`).
+- 🚀 **باز شدن سریع (پاس تازه):** تشخیص موتور FFmpeg به پس‌زمینه منتقل شد (قبلاً چند `spawnSync` و `reg query` روی رشتهٔ اصلی و *قبل* از ساخت پنجره اجرا می‌شد)، پنجره بلافاصله نمایش داده می‌شود و منتظر `ready-to-show` نمی‌ماند، پورت ثابت سرور محلی باعث استفادهٔ مجدد Chromium از کش و کد کامپایل‌شدهٔ رابط می‌شود، و `config.json` فقط یک‌بار خوانده می‌شود. جزئیات و اندازه‌گیری در بخش «Launch speed pass» همین فایل و `docs/BUGFIXES-FA.md`.
 
 ### فرمت‌ها و محدودیت‌ها
 
@@ -120,6 +121,7 @@ R9 شامل اصلاح تشخیص زیرنویس‌های کناری و حذف P
 
 - **New keys:** `PageDown` / `PageUp` jump to the next / previous item (wrapping), and `Delete` moves the file that was playing to the **Recycle Bin** and immediately continues with the next item (never when it is the only item).
 - **Lighter and faster:** batched playlist painting, no per-file probing at startup, invisible glass layers removed from the render tree, a real low-resource mode, and the FFmpeg bridge bug (`transcode_start`) fixed.
+- **Opens faster (new pass):** FFmpeg detection moved off the launch path (it used to run several blocking `spawnSync`/`reg query` calls on the main thread *before* the window existed), the window is shown immediately instead of waiting for `ready-to-show`, the local server keeps a stable port so Chromium can reuse its cache and compiled code between launches, and `config.json` is read once. See *Launch speed pass* above and `docs/BUGFIXES-FA.md` for details and measurements.
 - Local files and folders, URL/stream input, playlists, and selected HLS streams.
 - Embedded, sidecar, and online subtitles; R8/R9 improve Unicode/Persian filename matching, cluttered single-media folders, and common `Subs` folders.
 - Subtitle font, size, color, shadow, outline, background, position, and delay controls. The Settings sample Preview is removed; **Reset look** remains.

@@ -77,6 +77,7 @@ let miniUserMoved = false;   /* the user dragged it since then */
 let quitting = false;
 let closing = false;
 let bootArgs = [];
+let bootArgsReady = null;    /* promise: command-line paths collected after the window exists */
 const uploads = new Map();          /* drop id -> { file, stream, received, at } */
 const probeWarm = new Map();        /* path -> probe info (token hand-out warm-up) */
 const PROBE_WARM_MAX = 40;          /* a folder can hold thousands of files */
@@ -224,15 +225,37 @@ function createWindow() {
   win = new BrowserWindow(options);
   Menu.setApplicationMenu(null);
 
-  win.once('ready-to-show', function () {
+  /* The window is shown right away instead of waiting for `ready-to-show`.
+     That event only fires after the renderer has parsed the CSS/JS, built the
+     DOM and painted its first frame — waiting for it added the whole page load
+     to the time the user stared at a desktop with nothing on it. The window is
+     opaque with the app's own #0b0d13 background, so there is no white flash:
+     the frame appears instantly and the UI paints into it. */
+  const st = store.windowState() || {};
+  let revealed = false;
+  const applySavedState = function () {
+    if (!win || win.isDestroyed()) return;
+    try {
+      /* a maximized / fullscreen session is restored before the first paint so
+         the window never visibly jumps from its windowed size */
+      if (st.maximized && !win.isMaximized()) win.maximize();
+      if (st.fullscreen && !win.isFullScreen()) win.setFullScreen(true);
+    } catch (e) { }
+  };
+  const reveal = function () {
+    if (!win || win.isDestroyed()) return;
+    applySavedState();
+    if (revealed) return;
+    revealed = true;
     win.show();
-    const st = store.windowState() || {};
-    if (st.maximized) win.maximize();
-    if (st.fullscreen) win.setFullScreen(true);   /* restore a fullscreen session too */
     if (IS_DEV && !app.isPackaged && process.argv.indexOf('--devtools') >= 0) {
       win.webContents.openDevTools({ mode: 'detach' });
     }
-  });
+  };
+  /* ready-to-show still runs (it re-applies a saved maximize if the early call
+     was ignored by the window manager) but no longer gates the window */
+  win.once('ready-to-show', reveal);
+  reveal();
 
   win.loadURL(origin + '/');
 
@@ -524,6 +547,7 @@ async function remoteProbe(url) {
   }
 
   /* 2) tracks muxed into the stream itself (needs ffmpeg) */
+  if (ff && typeof ff.whenReady === 'function') { try { await ff.whenReady(); } catch (e) { } }
   if (ff && ff.available() && typeof ff.probeUrl === 'function') {
     try {
       const info = await ff.probeUrl(url);
@@ -557,6 +581,36 @@ async function remoteProbe(url) {
   log('[lumen] remote_probe ' + url + ' → ' + out.subs.length + ' subtitle track(s), ' +
     out.audio.length + ' audio track(s)' + (out.needsFfmpeg ? ' (ffmpeg missing)' : ''));
   return out;
+}
+
+/* the payload of boot_state once the background work (engine scan, command
+   line) has settled — kept out of the handler table so the whitelist stays
+   obvious at a glance */
+function bootStateNow() {
+  const s = store.settings();
+  let gpu = '';
+  try {
+    const status = app.getGPUFeatureStatus && app.getGPUFeatureStatus();
+    gpu = status && status.gpu_compositing ? 'gpu compositing: ' + status.gpu_compositing : '';
+    if (s.hw === false) gpu = 'hardware acceleration disabled in settings';
+  } catch (e) { }
+  return {
+    version: VERSION,
+    buildId: BUILD_ID,
+    platform: process.platform,
+    ffmpeg: !!(ff && ff.available()),
+    ffmpegBundled: isBundledFfmpeg(),
+    ffmpegInfo: ff ? ff.describe() : '',
+    settings: s,
+    playlist: store.playlist(),
+    resume: store.resume(),
+    subs: store.all.subs || {},
+    lastFile: store.all.lastFile || '',
+    args: bootArgs.slice(0),
+    gpu: gpu,
+    audio: '',
+    dataDir: userDataDir()
+  };
 }
 
 const handlers = {
@@ -601,14 +655,19 @@ const handlers = {
     return changed;
   },
   ffmpeg_status: function () {
-    return {
-      available: !!(ff && ff.available()),
-      probe: !!(ff && ff.canProbe()),
-      bundled: isBundledFfmpeg(),
-      version: (ff && ff.version) ? ff.version() : '',
-      path: (ff && ff.path) || '',
-      dirs: (ff && ff.searchDirs) ? ff.searchDirs() : []
-    };
+    if (!ff) return { available: false, probe: false, bundled: false, version: '', path: '', dirs: [] };
+    /* the engine is detected in the background now — answer once it is done
+       instead of reporting "unavailable" to a Settings panel opened early */
+    return ff.whenReady().then(function () {
+      return {
+        available: !!(ff && ff.available()),
+        probe: !!(ff && ff.canProbe()),
+        bundled: isBundledFfmpeg(),
+        version: (ff && ff.version) ? ff.version() : '',
+        path: (ff && ff.path) || '',
+        dirs: (ff && ff.searchDirs) ? ff.searchDirs() : []
+      };
+    });
   },
   /* Settings → Media engine → "Choose ffmpeg.exe…".
      An explicit path argument skips the dialog (used by the tests, and by
@@ -620,19 +679,21 @@ const handlers = {
       if (!dir) return { ok: false, error: 'that folder does not contain ffmpeg.exe' };
       const prevEnv = process.env.LUMEN_FFMPEG || '';
       process.env.LUMEN_FFMPEG = dir;
-      const r = ff ? ff.rescan() : null;
-      /* the engine must come from *this* folder — otherwise the user mis-clicked
-         and some other ffmpeg on the system answered */
-      const fromHere = !!(r && r.path && path.resolve(path.dirname(r.path)) === path.resolve(dir));
-      if (!r || !r.available || !fromHere) {
-        process.env.LUMEN_FFMPEG = prevEnv;
-        try { if (ff) ff.rescan(); } catch (e) { }
-        return { ok: false, error: dir + ' does not contain a working ffmpeg (expected ffmpeg.exe next to ffprobe.exe)' };
-      }
-      setManualFfmpeg(dir);
-      probeWarm.clear();
-      log('ffmpeg set by hand →', dir, ff.describe());
-      return { ok: true, dir: dir, path: ff.path, version: ff.version() };
+      /* rescan() is asynchronous now (it spawns the usual candidates) */
+      return Promise.resolve(ff ? ff.rescan() : null).then(function (r) {
+        /* the engine must come from *this* folder — otherwise the user
+           mis-clicked and some other ffmpeg on the system answered */
+        const fromHere = !!(r && r.path && path.resolve(path.dirname(r.path)) === path.resolve(dir));
+        if (!r || !r.available || !fromHere) {
+          process.env.LUMEN_FFMPEG = prevEnv;
+          try { if (ff) ff.rescan(); } catch (e) { }
+          return { ok: false, error: dir + ' does not contain a working ffmpeg (expected ffmpeg.exe next to ffprobe.exe)' };
+        }
+        setManualFfmpeg(dir);
+        probeWarm.clear();
+        log('ffmpeg set by hand →', dir, ff.describe());
+        return { ok: true, dir: dir, path: ff.path, version: ff.version() };
+      });
     };
     if (typeof forced === 'string' && forced) return finish(forced);
     return new Promise(function (resolve) {
@@ -652,9 +713,10 @@ const handlers = {
   },
   ffmpeg_rescan: function () {
     if (!ff) return null;
-    const r = ff.rescan();
-    log('ffmpeg rescan:', r, ff.describe());
-    return { available: !!(ff && ff.available()), path: ff.path || '' };
+    return ff.rescan().then(function (r) {
+      log('ffmpeg rescan:', r, ff.describe());
+      return { available: !!(ff && ff.available()), path: ff.path || '' };
+    });
   },
   /* subtitle tracks of an online stream: sidecar files + ffprobe over http */
   remote_probe: function (url) {
@@ -703,30 +765,14 @@ const handlers = {
 
   /* -------------------------------------------------------------- config */
   boot_state: function () {
-    const s = store.settings();
-    let gpu = '';
-    try {
-      const status = app.getGPUFeatureStatus && app.getGPUFeatureStatus();
-      gpu = status && status.gpu_compositing ? 'gpu compositing: ' + status.gpu_compositing : '';
-      if (s.hw === false) gpu = 'hardware acceleration disabled in settings';
-    } catch (e) { }
-    return {
-      version: VERSION,
-      buildId: BUILD_ID,
-      platform: process.platform,
-      ffmpeg: !!(ff && ff.available()),
-      ffmpegBundled: isBundledFfmpeg(),
-      ffmpegInfo: ff ? ff.describe() : '',
-      settings: s,
-      playlist: store.playlist(),
-      resume: store.resume(),
-      subs: store.all.subs || {},
-      lastFile: store.all.lastFile || '',
-      args: bootArgs.slice(0),
-      gpu: gpu,
-      audio: '',
-      dataDir: userDataDir()
-    };
+    /* the renderer asks for this as soon as the page is up. The engine scan
+       runs in the background and the command line is read after the window is
+       on screen, so wait for both instead of answering with half a state. */
+    const pending = [
+      (ff && ff.whenReady) ? ff.whenReady() : Promise.resolve(null),
+      bootArgsReady || Promise.resolve(bootArgs)
+    ];
+    return Promise.all(pending).then(bootStateNow);
   },
   settings_set: function (json) {
     try {
@@ -863,8 +909,13 @@ const handlers = {
   register_path: function (p) {
     if (!util.isFile(p)) return null;
     const token = srv.registerPath(p);
-    if (!probeWarm.has(p) && ff && ff.available()) {
-      ff.probe(p).then(function (info) {
+    /* the engine may still be scanning in the first moments of the session —
+       wait for it instead of silently skipping the metadata */
+    if (!probeWarm.has(p) && ff) {
+      Promise.resolve(ff.available() ? true : ff.whenReady()).then(function (ok) {
+        if (!ff.available()) return null;
+        return ff.probe(p);
+      }).then(function (info) {
         if (info) rememberProbe(p, info);
       }).catch(function () { });
     }
@@ -937,8 +988,9 @@ const handlers = {
   },
   /* dropping ffmpeg.exe (or its folder) onto the window sets the engine too */
   ffmpeg_drop: function (p) {
-    const res = handlers.ffmpeg_pick(String(p || ''));
-    return res && res.ok ? { ok: true, dir: res.dir, version: res.version } : { ok: false };
+    return Promise.resolve(handlers.ffmpeg_pick(String(p || ''))).then(function (res) {
+      return res && res.ok ? { ok: true, dir: res.dir, version: res.version } : { ok: false };
+    });
   },
   reveal: function (p) {
     try { shell.showItemInFolder(p); return true; } catch (e) { return false; }
@@ -993,8 +1045,14 @@ const handlers = {
          the second stop when a remuxed stream has no picture (HEVC/x265, 10-bit…). */
       const re = reencode ? '&re=1' : '';
       const plainUrl = '/' + 'transcode?t=' + token + '&t0=' + at.toFixed(3) + (idx != null ? '&a=' + idx : '') + tm + re;
-      if (!ff || !ff.available()) { resolve({ url: plainUrl, start: at, videoCopy: false }); return; }
-      Promise.resolve(probeWarm.get(p) || ff.probe(p)).then(function (info) {
+      if (!ff) { resolve({ url: plainUrl, start: at, videoCopy: false }); return; }
+      /* a file opened in the first moments of a launch is planned once the
+         background engine scan has answered (otherwise it would be treated
+         as "no ffmpeg" and copied instead of converted) */
+      Promise.resolve(ff.available() ? true : ff.whenReady()).then(function () {
+        if (!ff.available()) return null;
+        return probeWarm.get(p) || ff.probe(p);
+      }).then(function (info) {
         if (!info) { resolve({ url: plainUrl, start: at, videoCopy: false }); return; }
         rememberProbe(p, info);
         const plan = ff.plan(info, idx);
@@ -1004,9 +1062,12 @@ const handlers = {
     });
   },
   probe: function (p) {
-    if (!ff || !ff.available() || !util.isFile(p)) return null;
+    if (!ff || !util.isFile(p)) return null;
     if (probeWarm.has(p)) return probeWarm.get(p);
-    return ff.probe(p).then(function (info) {
+    return ff.whenReady().then(function () {
+      if (!ff.available()) return null;
+      return ff.probe(p);
+    }).then(function (info) {
       if (info) rememberProbe(p, info);
       return info;
     });
@@ -1059,7 +1120,10 @@ if (gotLock) {
 
   app.whenReady().then(function () {
     try { app.setAppUserModelId('com.lumen.player'); } catch (e) { }
-    store = createStore(path.join(userDataDir(), 'config.json'));
+    /* earlyReadConfig() already parsed this file before `ready` (the hardware
+       acceleration flag has to be decided that early) — reuse it instead of
+       reading config.json twice on every launch */
+    store = createStore(path.join(userDataDir(), 'config.json'), earlyCfg);
     applyManualFfmpeg();
     ff = createFfmpeg({
       dirs: [
@@ -1073,12 +1137,20 @@ if (gotLock) {
       ]
     });
     srv = createServer({ webDir: WEB_DIR, ff: ff, log: log });
-    bootArgs = collectPaths(process.argv.slice(1));
 
     srv.listen().then(function (info) {
       origin = info.origin;
       log('server ready on ' + origin + ' · ' + (ff ? ff.describe() : 'no ffmpeg'));
+      /* the window comes first; walking the command line (a folder argument can
+         mean thousands of stat() calls) happens right after it — boot_state
+         waits for the result, so nothing is lost */
       createWindow();
+      bootArgsReady = new Promise(function (resolve) {
+        setImmediate(function () {
+          try { bootArgs = collectPaths(process.argv.slice(1)); } catch (e) { bootArgs = []; }
+          resolve(bootArgs);
+        });
+      });
     }).catch(function (e) {
       dialog.showErrorBox('Lumen', 'The local media server could not start:\n' + (e && e.message));
       app.quit();

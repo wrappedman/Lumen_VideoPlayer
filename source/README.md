@@ -25,6 +25,27 @@ Playback, shortcuts and performance fixes on top of R9:
 - **Real low-resource mode.** Settings → *Low-resource mode* now removes every live blur and uses solid surfaces; it was previously almost a no-op.
 - Smaller host-state writes, bounded metadata caches, ETag/304 static files, the unused `scene_bright.jpg` removed and the second idle artwork loaded only when it is displayed.
 
+## Launch speed pass (same R9 source drop)
+
+The window used to appear only after the whole launch chain had finished. That chain is now split so nothing on the critical path waits for anything slow:
+
+- **The media engine is detected in the background.** `host/ffmpeg.js` used to call `spawnSync()` for every candidate — up to four `reg query` runs for the registry `PATH`, plus an `ffmpeg -version` / `ffprobe -version` probe — on the main thread, before the window object existed. Detection is now asynchronous (`spawn` + `whenReady()`), starts as soon as the module is created and runs while Chromium boots. `boot_state`, `transcode_start`, `probe`, `register_path`, `ffmpeg_status` and the online-stream probe await it instead of skipping the engine.
+- **The version string is free.** It is parsed from the `-version` output that detection already produced, so opening Settings no longer spawns ffmpeg again.
+- **The filter list is warmed up off the UI thread.** `hasFilter()` (HDR tone-mapping) used to block for a `ffmpeg -filters` run on first use; it is now fetched once, 1.2 s after the engine is found, and still answers synchronously if asked before that.
+- **The window is shown immediately.** `ready-to-show` fires only after the renderer has parsed the CSS/JS and painted — waiting for it added the whole page load to the launch. The window is opaque with the app's own `#0b0d13` background, so there is no white flash; a saved maximized/fullscreen state is applied before it appears.
+- **A stable local port.** The server prefers `127.0.0.1:47821` (falling back to an ephemeral port if it is taken). A stable origin lets Chromium reuse its disk cache — and the compiled V8 code of the ~240 kB of player JS — between launches instead of treating every start as a brand-new site. It also keeps `localStorage` alive across runs, so theme and volume are correct on the first painted frame.
+- **`config.json` is parsed once.** The early read that decides hardware acceleration before `ready` is handed to the store instead of being repeated.
+- **Command-line paths are collected after the window is up.** Passing a folder can mean thousands of `stat()` calls; `boot_state` waits for the result, so nothing is lost.
+- Two real bugs surfaced while restructuring: a busy-port retry could make the listen callback fire twice (which would have built a second window), and `rescan()` used to drop the engine path while re-scanning, which could 503 a stream that was already playing.
+
+Measured with `tests/test-host-boot.js` (a deliberately slow fake engine: 150 ms per `-version`):
+
+```
+window shown ..............  37 ms after main.js is loaded
+engine scan finished ...... 210 ms (runs in the background)
+boot_state answered ....... 210 ms  (was: the launch blocked here first)
+```
+
 ## R7 feature baseline
 
 - The Windows installer and portable package include **FFmpeg 9.0.2 + ffprobe**. Users do not need to install a codec pack or a separate FFmpeg program.
@@ -118,6 +139,7 @@ Application code is MIT-licensed; that does not replace the separate terms that 
 node tests/test-sidecar-matcher.js        # 8 checks, no dependencies
 node tests/test-zip.js                    # 8 checks, the build's unzip fallback
 node tests/test-source-ui.js              # 18 static checks
+node tests/test-host-boot.js              # 4 host launch checks (fakes `electron`, runs main.js)
 npm install --no-save jsdom               # optional, only for the next one
 node tests/test-keyboard-renderer.js      # 8 headless UI checks
 node tests/test-ui-smoke.js               # 12 interaction checks
