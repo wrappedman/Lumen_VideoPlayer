@@ -551,6 +551,10 @@
       this.pendingItem = null;
       if (!item) return;
       this._resetLoadState(item);
+      /* the closures in here (autoplay timer, embedded-track probe) share `self`
+         — without it they resolved to window.self and every one of them bailed
+         out silently (embedded subtitles never reached the track list) */
+      var self = this;
       if (Audio.wanted() && !item.demo && !item.path && /^https?:/i.test(item.url || '')) item._proxied = true;
       var v = this.el;
 
@@ -1206,6 +1210,9 @@
 
   Player.setSubtitle = function (track, silent, atOverride) {
     var item = this.item, layer = $('#subsLayer');
+    /* a manual choice (including "Off") is the user's last word — auto-pick must
+       not undo it when more tracks appear later */
+    if (silent !== true && item) this._subAutoItem = item;
     this.subActive = track;
     this.subCues = [];
     this._subSig = '';
@@ -1366,7 +1373,6 @@
   Player.autoPickSub = function (item) {
     if (!S.subautoload || !item || this.item !== item) return;
     if (this.subActive || this._subAutoItem === item) return;
-    this._subAutoItem = item;
     var pick = null, i;
     var ext = this.subTracks.filter(function (tr) { return tr && tr.kind === 'external'; });
     /* a remembered pick always wins; then the subtitle whose language matches
@@ -1385,7 +1391,16 @@
         if (this.subTracks[i] && this.subTracks[i].kind === 'embedded') pick = this.subTracks[i];
       }
     }
-    if (pick) this.setSubtitle(pick, true, this.pendingSeek || this.time || 0);
+    if (pick) {
+      this._subAutoItem = item;              /* decided — never second-guess this item */
+      this.setSubtitle(pick, true, this.pendingSeek || this.time || 0);
+    } else if (this.info) {
+      /* the probe answered and there is nothing to pick — the track list is
+         final for this item, so stop reconsidering on every merge */
+      this._subAutoItem = item;
+    }
+    /* nothing found yet (the probe may still be walking the file): keep the
+       item unmarked so the slower embedded-track lookup can pick when it lands */
   };
 
   Player.reloadSubtitleDelay = function () {

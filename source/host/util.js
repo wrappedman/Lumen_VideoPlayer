@@ -4,6 +4,7 @@
    ========================================================================== */
 const path = require('path');
 const fs = require('fs');
+const { TextDecoder } = require('util');
 
 const VIDEO_EXT = ['mp4', 'm4v', 'mkv', 'webm', 'avi', 'mov', 'mpg', 'mpeg', 'ts', 'm2ts',
   'wmv', 'flv', 'ogv', '3gp', 'mpd', 'm3u8', 'm3u', 'vob', 'divx', 'rmvb'];
@@ -132,9 +133,66 @@ function listFolderFiles(dir) {
   } catch (e) { return []; }
 }
 
+/* ------------------------------------------------------------------ text ----
+   Persian subtitle files in the wild arrive as UTF-8 (with or without BOM),
+   UTF-16 (usually LE with BOM) and — from the older sites — Windows-1256.
+   A plain readFileSync(p, 'utf8') produced NUL-soup that no cue parser could
+   read, so sidecar files "just didn't load". Decode properly instead. */
+function isValidUtf8(buf) {
+  let i = 0;
+  const n = buf.length;
+  while (i < n) {
+    const b = buf[i];
+    if (b < 0x80) { i++; continue; }
+    let len = 0;
+    if ((b & 0xE0) === 0xC0) len = 1;
+    else if ((b & 0xF0) === 0xE0) len = 2;
+    else if ((b & 0xF8) === 0xF0) len = 3;
+    else return false;
+    if (i + len >= n) return false;
+    for (let j = 1; j <= len; j++) { if ((buf[i + j] & 0xC0) !== 0x80) return false; }
+    i += len + 1;
+  }
+  return true;
+}
+
+function swapUtf16be(buf, offset) {
+  const sw = Buffer.allocUnsafe(buf.length - offset - ((buf.length - offset) % 2));
+  for (let i = 0; i + 1 < buf.length - offset; i += 2) {
+    sw[i] = buf[offset + i + 1];
+    sw[i + 1] = buf[offset + i];
+  }
+  return sw;
+}
+
+function decodeSubtitleBuffer(buf) {
+  if (!buf || !buf.length) return '';
+  /* BOMs first */
+  if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) return buf.toString('utf16le', 2);
+  if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) return swapUtf16be(buf, 2).toString('utf16le', 0);
+  if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) return buf.toString('utf8', 3);
+  /* UTF-16 without a BOM: one half of the byte pairs is NUL for ASCII text */
+  let nulOdd = 0, nulEven = 0;
+  const n = Math.min(buf.length, 8192);
+  for (let i = 0; i + 1 < n; i += 2) if (buf[i] === 0) nulEven++;
+  for (let i = 1; i + 1 < n; i += 2) if (buf[i] === 0) nulOdd++;
+  const pairs = Math.ceil(n / 2) || 1;
+  if (nulOdd > pairs / 2) return buf.toString('utf16le', 0);
+  if (nulEven > pairs / 2) return swapUtf16be(buf, 0).toString('utf16le', 0);
+  if (isValidUtf8(buf)) return buf.toString('utf8', 0);
+  /* legacy single-byte: Persian SRTs are very often Windows-1256 */
+  try { return new TextDecoder('windows-1256').decode(buf); } catch (e) { return buf.toString('latin1'); }
+}
+
+function decodeSubtitleFile(file) {
+  const buf = fs.readFileSync(file);
+  return decodeSubtitleBuffer(buf);
+}
+
 module.exports = {
   VIDEO_EXT, AUDIO_EXT, SUB_EXT, MIME,
   baseName, extName, stripExt, mimeFor, exists, isFile, isDir,
   isVideoExt, isAudioExt, isSubExt, isMediaExt,
-  fmtBytes, aspectLabel, fmtDuration, listFolderFiles
+  fmtBytes, aspectLabel, fmtDuration, listFolderFiles,
+  isValidUtf8, decodeSubtitleBuffer, decodeSubtitleFile
 };

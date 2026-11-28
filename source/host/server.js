@@ -216,7 +216,7 @@ function createServer(opts) {
           if (size > cap) { try { req.destroy(); } catch (e) { } reject(new Error('subtitle file is too big')); return; }
           chunks.push(d);
         });
-        upRes.on('end', function () { resolve({ text: Buffer.concat(chunks).toString('utf8'), type: upRes.headers['content-type'] || '' }); });
+        upRes.on('end', function () { resolve({ buf: Buffer.concat(chunks), type: upRes.headers['content-type'] || '' }); });
         upRes.on('error', reject);
       });
       req.setTimeout(25000, function () { try { req.destroy(); } catch (e) { } reject(new Error('timed out')); });
@@ -229,7 +229,7 @@ function createServer(opts) {
     if (util.isFile(cached) && serveVttFile(res, cached)) return;
     log('[lumen] fetching online subtitle ' + url);
     fetchRemote(url).then(function (r) {
-      const vtt = toVtt(r.text, util.baseName(url.split('?')[0]));
+      const vtt = toVtt(util.decodeSubtitleBuffer(r.buf), util.baseName(url.split('?')[0]));
       if (!/-->/.test(vtt)) { send(res, 415, 'that link is not a subtitle file'); return; }
       try { fs.writeFileSync(cached, vtt, 'utf8'); } catch (e) { }
       serveVtt(res, vtt);
@@ -563,6 +563,22 @@ function createServer(opts) {
     }).catch(function () { send(res, 500, 'Thumbnail failed'); });
   }
 
+  /* The engine scan runs in the background after launch (by design); a
+     subtitle request — embedded track, ASS sidecar or a format the in-process
+     converter cannot handle — that arrives while the scan is still running
+     must wait for it, not fail with 503. Requests answered from plain bytes
+     (netfile, native sidecars) skip the wait entirely. */
+  function ffReady() {
+    if (!ff) return Promise.resolve(false);
+    if (ff.available && ff.available()) return Promise.resolve(true);
+    if (typeof ff.whenReady === 'function') {
+      return Promise.resolve(ff.whenReady()).then(function () {
+        return !!(ff.available && ff.available());
+      }).catch(function () { return false; });
+    }
+    return Promise.resolve(false);
+  }
+
   function subtitle(req, res, entry, q) {
     const id = String(q.get('id') || '');
     const at = Math.max(0, parseFloat(q.get('at')) || 0);
@@ -570,6 +586,20 @@ function createServer(opts) {
     const isAss = fmt === 'ass' || fmt === 'ssa';
     /* a subtitle that lives online next to the stream */
     if (id.indexOf('netfile:') === 0) { remoteSidecar(res, id.slice(8)); return; }
+    /* can the in-process converter answer this without the engine? */
+    let ffFree = false;
+    if (id.indexOf('ext:') === 0) {
+      const e = util.extName(id.slice(4));
+      ffFree = (e === 'srt' || e === 'vtt' || e === 'txt' || e === 'ass' || e === 'ssa');
+    }
+    if (ffFree) { subtitleAnswer(req, res, entry, q, id, at, fmt, isAss); return; }
+    ffReady().then(function (ok) {
+      if (!ok) { send(res, 503, 'ffmpeg is required for embedded subtitles'); return; }
+      subtitleAnswer(req, res, entry, q, id, at, fmt, isAss);
+    }).catch(function () { send(res, 500, 'Subtitle error'); });
+  }
+
+  function subtitleAnswer(req, res, entry, q, id, at, fmt, isAss) {
     /* a subtitle stream inside a remote container / playlist */
     if (id.indexOf('netstream:') === 0) {
       if (!ff || !ff.available()) { send(res, 503, 'ffmpeg is required for the tracks inside a stream'); return; }
@@ -590,7 +620,7 @@ function createServer(opts) {
       const nativeFormats = { srt: 1, vtt: 1, txt: 1, ass: 1, ssa: 1 };
       if (nativeFormats[ext]) {
         try {
-          const raw = fs.readFileSync(p, 'utf8');
+          const raw = util.decodeSubtitleFile(p);
           const vtt = toVtt(raw, util.baseName(p));
           if (!/-->/.test(vtt)) {
             send(res, 415, 'this sidecar format cannot be converted — use .srt, .ass or .vtt');

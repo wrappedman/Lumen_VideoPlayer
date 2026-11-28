@@ -487,11 +487,15 @@ function createFfmpeg(opts) {
             label: label, codec: (am[2] || '').toLowerCase(), lang: am[1] || '', channels: 0, default: info.audio.length === 0 });
           if (!info.acodec) info.acodec = (am[2] || '').toLowerCase();
         }
-        const sm = line.match(/Stream #\d+:\d+(?:\((\w+)\))?: Subtitle:\s*([a-z0-9_]+)/i);
+        /* keep the real stream index ("Stream #0:2" → -map 0:2); a -1 here
+           made every embedded subtitle fail with "bad subtitle stream" when
+           ffprobe was unavailable and this fallback parser was all there was */
+        const sm = line.match(/Stream #\d+:(\d+)(?:\((\w+)\))?: Subtitle:\s*([a-z0-9_]+)/i);
         if (sm) {
-          info.subs.push({ id: 's:' + (-1), index: -1, order: info.subs.length,
-            label: [(sm[1] || '').toUpperCase(), (sm[2] || '').toUpperCase()].filter(Boolean).join(' · '),
-            kind: 'embedded', lang: sm[1] || '', codec: String(sm[2] || '').toLowerCase() });
+          const sidx = parseInt(sm[1], 10);
+          info.subs.push({ id: 's:' + sidx, index: sidx, order: info.subs.length,
+            label: [(sm[2] || '').toUpperCase(), (sm[3] || '').toUpperCase()].filter(Boolean).join(' · '),
+            kind: 'embedded', lang: sm[2] || '', codec: String(sm[3] || '').toLowerCase() });
         }
       });
       info.format = (txt.match(/Input #0,\s*([^,]+)/) || [])[1] || '';
@@ -655,7 +659,7 @@ function createFfmpeg(opts) {
 
   function looksLikeSubtitleText(file) {
     try {
-      const text = fs.readFileSync(file, 'utf8').slice(0, 128 * 1024);
+      const text = util.decodeSubtitleFile(file).slice(0, 128 * 1024);
       return /(?:^|\n)\s*WEBVTT\b/i.test(text) ||
         /(?:^|\n)\s*\d+\s*\r?\n\s*\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->/.test(text) ||
         /(?:^|\n)\s*\{\d+\}\{\d+\}/.test(text) ||
@@ -758,14 +762,14 @@ function createFfmpeg(opts) {
       if (!util.isFile(p) || !util.isSubExt(util.extName(p))) return Promise.resolve(null);
       const e = util.extName(p);
       if (e === 'vtt') {
-        return Promise.resolve(fs.readFileSync(p, 'utf8'));
+        return Promise.resolve(util.decodeSubtitleFile(p));
       }
       if (e === 'srt' || e === 'txt' || e === 'sub') {
-        if (e === 'sub' && /\[\d+\]\[/.test(fs.readFileSync(p, 'utf8').slice(0, 400))) {
+        if (e === 'sub' && /\[\d+\]\[/.test(util.decodeSubtitleFile(p).slice(0, 400))) {
           /* MicroDVD — ffmpeg understands it */
           return ffmpegSubtitle(p, null);
         }
-        return Promise.resolve(srtToVtt(fs.readFileSync(p, 'utf8')));
+        return Promise.resolve(srtToVtt(util.decodeSubtitleFile(p)));
       }
       return ffmpegSubtitle(p, null);
     }
