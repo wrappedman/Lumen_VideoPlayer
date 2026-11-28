@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 
-function createStore(file) {
+function createStore(file, initial) {
   const defaults = {
     version: 1,
     settings: {},
@@ -22,10 +22,12 @@ function createStore(file) {
 
   let data = JSON.parse(JSON.stringify(defaults));
   try {
-    if (fs.existsSync(file)) {
-      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (raw && typeof raw === 'object') data = Object.assign(data, raw);
-    }
+    /* `initial` is what main.js already parsed at module load (it needs the
+       hardware-acceleration flag before `ready`). Handing it over avoids
+       reading and parsing config.json a second time on the launch path. */
+    let raw = (initial && typeof initial === 'object') ? initial : null;
+    if (!raw && fs.existsSync(file)) raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (raw && typeof raw === 'object') data = Object.assign(data, raw);
   } catch (e) { /* a broken config must never stop the app from starting */ }
 
   let timer = null;

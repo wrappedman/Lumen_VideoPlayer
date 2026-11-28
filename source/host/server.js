@@ -642,13 +642,50 @@ function createServer(opts) {
   server.keepAliveTimeout = 30000;
 
   return {
+    /* A *stable* port matters for launch speed: the renderer's origin is the
+       http://127.0.0.1:<port> it loads from, so an ephemeral port means
+       Chromium sees a brand-new origin on every start and has to re-fetch and
+       re-parse everything (the ~240 kB of player JS included) instead of
+       reusing its disk cache. 47821 sits below the Windows dynamic range, and
+       if it is taken (another Windows session, a leftover process) the server
+       silently falls back to an ephemeral port — the old behaviour. */
     listen() {
+      const PREFERRED_PORT = 47821;
       return new Promise(function (resolve, reject) {
-        server.once('error', reject);
-        server.listen(0, '127.0.0.1', function () {
-          const port = server.address().port;
-          resolve({ port: port, origin: 'http://127.0.0.1:' + port });
-        });
+        let settled = false;
+        const done = function (info) {
+          /* Node re-fires the listen callback after a failed attempt + retry
+             (observed with the busy-port fallback): answering twice would make
+             the host build a second window */
+          if (settled) return;
+          settled = true;
+          log('[lumen] media server on 127.0.0.1:' + info.port);
+          resolve(info);
+        };
+        const failed = function (e) {
+          if (settled) return;
+          settled = true;
+          reject(e);
+        };
+        const attempt = function (port, mayFallBack) {
+          const onError = function (e) {
+            server.removeListener('error', onError);
+            if (mayFallBack && e && e.code === 'EADDRINUSE') {
+              attempt(0, false);
+              return;
+            }
+            failed(e);
+          };
+          server.once('error', onError);
+          server.listen(port, '127.0.0.1', function () {
+            server.removeListener('error', onError);
+            /* a late socket error must never crash the host unhandled */
+            server.on('error', function () { });
+            const got = server.address().port;
+            done({ port: got, origin: 'http://127.0.0.1:' + got });
+          });
+        };
+        attempt(PREFERRED_PORT, true);
       });
     },
     registerPath, registerUrl, lookup,
