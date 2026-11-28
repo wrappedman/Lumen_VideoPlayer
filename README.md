@@ -37,6 +37,7 @@
 - 🖱️ **تعامل دسکتاپ:** منوی راست‌کلیک، میان‌برها و دیالوگ Open URL با Cut/Copy/Paste.
 - ⌨️ **میان‌برهای تازه:** `PageDown` / `PageUp` رفتن به ویدیوی بعدی/قبلی (با چرخش دور فهرست) و `Delete` انتقال فایل در حال پخش به **Recycle Bin** و پخش فوری ویدیوی بعدی. اگر فهرست فقط یک آیتم داشته باشد، فایل حذف نمی‌شود.
 - ⚡ **سبک و سریع:** رسم تجمیعی فهرست پخش، بدون ffprobe برای هر فایل هنگام شروع، حذف کامل لایه‌های شیشه‌ای نامرئی از رندر، حالت کم‌مصرف واقعی، و رفع باگ مسیر FFmpeg (`transcode_start`).
+- 🩹 **رفع باگ زیرنویس (پاس تازه):** زیرنویس‌های داخل فایل (Embedded) به فهرست ترک‌ها نمی‌رسیدند (`_load` تعریف `self` نداشت) و انتخاب خودکارشان هم شکست می‌خورد؛ حالا ترک‌های داخلی پیدا، خودکار بارگذاری و با کناری‌ها ادغام می‌شوند. مسیر `/subtitle` هنگام تشخیص پس‌زمینهٔ موتور ۵۰۳ نمی‌دهد، SRTهای UTF-16 و Windows-1256 (رایج برای فارسی) درست decode می‌شوند، و fallback بدون ffprobe ایندکس واقعی stream را گزارش می‌کند. جزئیات: `docs/BUGFIXES-FA.md` (دور ۱۳).
 - 🚀 **باز شدن سریع (پاس تازه):** تشخیص موتور FFmpeg به پس‌زمینه منتقل شد (قبلاً چند `spawnSync` و `reg query` روی رشتهٔ اصلی و *قبل* از ساخت پنجره اجرا می‌شد)، پنجره بلافاصله نمایش داده می‌شود و منتظر `ready-to-show` نمی‌ماند، پورت ثابت سرور محلی باعث استفادهٔ مجدد Chromium از کش و کد کامپایل‌شدهٔ رابط می‌شود، و `config.json` فقط یک‌بار خوانده می‌شود. جزئیات و اندازه‌گیری در بخش «Launch speed pass» همین فایل و `docs/BUGFIXES-FA.md`.
 
 ### فرمت‌ها و محدودیت‌ها
@@ -99,7 +100,7 @@ node tests/test-ui-smoke.js
 
 ## 📦 وضعیت Revision 9
 
-R9 شامل اصلاح تشخیص زیرنویس‌های کناری و حذف Preview از Settings است و خطای Schannel در دانلود build را نیز پوشش می‌دهد. شناسهٔ ساخت: `r9-2026-10-04`. یک پاس اصلاحی (میان‌برهای `PageDown`/`PageUp`/`Delete`، رفع باگ پل FFmpeg و بهینه‌سازی عملکرد) روی همین سورس اعمال شده و ZIP به‌روز شده است.
+R9 شامل اصلاح تشخیص زیرنویس‌های کناری و حذف Preview از Settings است و خطای Schannel در دانلود build را نیز پوشش می‌دهد. شناسهٔ ساخت: `r9-2026-10-04`. یک پاس اصلاحی (میان‌برهای `PageDown`/`PageUp`/`Delete`، رفع باگ پل FFmpeg و بهینه‌سازی عملکرد) و یک پاس رفع باگ زیرنویس روی همین سورس اعمال شده‌اند و ZIP به‌روز شده است.
 
 ## ⚖️ مجوزها
 
@@ -121,6 +122,7 @@ R9 شامل اصلاح تشخیص زیرنویس‌های کناری و حذف P
 
 - **New keys:** `PageDown` / `PageUp` jump to the next / previous item (wrapping), and `Delete` moves the file that was playing to the **Recycle Bin** and immediately continues with the next item (never when it is the only item).
 - **Lighter and faster:** batched playlist painting, no per-file probing at startup, invisible glass layers removed from the render tree, a real low-resource mode, and the FFmpeg bridge bug (`transcode_start`) fixed.
+- **Subtitles fixed:** embedded tracks never reached the track list (`_load()` referenced `self` without declaring it) and auto-load gave up before the probe answered; sidecar files encoded as UTF-16 or Windows-1256 decoded to NUL-soup; the `/subtitle` route 503'd during the background engine scan instead of waiting. Internal tracks now load automatically and merge with sidecar tracks. See *Subtitle loading repair* in `source/README.md` and docs/BUGFIXES-FA.md (round 13).
 - **Opens faster (new pass):** FFmpeg detection moved off the launch path (it used to run several blocking `spawnSync`/`reg query` calls on the main thread *before* the window existed), the window is shown immediately instead of waiting for `ready-to-show`, the local server keeps a stable port so Chromium can reuse its cache and compiled code between launches, and `config.json` is read once. See *Launch speed pass* above and `docs/BUGFIXES-FA.md` for details and measurements.
 - Local files and folders, URL/stream input, playlists, and selected HLS streams.
 - Embedded, sidecar, and online subtitles; R8/R9 improve Unicode/Persian filename matching, cluttered single-media folders, and common `Subs` folders.

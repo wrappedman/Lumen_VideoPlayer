@@ -46,6 +46,17 @@ engine scan finished ...... 210 ms (runs in the background)
 boot_state answered ....... 210 ms  (was: the launch blocked here first)
 ```
 
+## Subtitle loading repair (same R9 source drop)
+
+Embedded subtitle tracks silently never reached the track list: `_load()` in `web/app.js` referenced `self` without declaring it, so its closures resolved to `window.self` and the whole post-probe block (which merges ffprobe's subtitle tracks into the UI, fills the audio-track list and `Player.info`) returned early at `self.item !== item`. Sidecar tracks still worked (their own closure declares it), so files whose subtitles were muxed inside the video looked like "subtitles are not read" to the user. Auto-load also bailed out for those files, because `autoPickSub` stamped the item as "decided" before any track was visible.
+
+- `_load()` now declares `var self = this`, restoring embedded-track discovery, audio-track list, chapter marks and the early re-encode trigger for incompatible codecs.
+- `autoPickSub` marks an item as decided only when a pick actually happened or when the probe answered with nothing; a manual choice (including "Off") is respected instead of being undone by the late probe merge.
+- The `/subtitle` route waits for the background engine scan (`whenReady()`) instead of answering 503 while it is still running; byte-native sidecars (SRT/VTT/ASS) keep the zero-wait path.
+- Sidecar text is decoded properly: UTF-8 with/without BOM, UTF-16 with/without BOM, and legacy Windows-1256 (the common Persian-SRT encoding) via `TextDecoder` — previously a `utf8` read turned those files into NUL-soup with zero cues.
+- Without ffprobe, the embedded-track fallback parser now reports each track's real stream index (`Stream #0:N` → `-map 0:N`) instead of `-1` (which made every embedded subtitle fail with 400).
+- New regression coverage in `tests/test-subtitle-load.js`: host decoding for the three encodings, embedded tracks reaching the list and auto-loading, sidecar+embedded merge, and a manual "Off" surviving a late probe merge.
+
 ## R7 feature baseline
 
 - The Windows installer and portable package include **FFmpeg 9.0.2 + ffprobe**. Users do not need to install a codec pack or a separate FFmpeg program.
